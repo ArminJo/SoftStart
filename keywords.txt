@@ -1,0 +1,30 @@
+#######################################
+# Syntax Coloring Map for TRIACRamp
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+Mylong	KEYWORD1
+RampControlStruct	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+initRampControl	KEYWORD2
+startRamp	KEYWORD2
+stopRamp	KEYWORD2
+setCalibrationMode	KEYWORD2
+checkAndHandleCounterOverflowForLoop	KEYWORD2
+printRampInfo	KEYWORD2
+StartTriacPulse	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+TRACE	LITERAL1
+DEBUG	LITERAL1
+INFO	LITERAL1
+WARN	LITERAL1
+ERROR	LITERAL1
