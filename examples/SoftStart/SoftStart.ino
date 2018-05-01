@@ -51,7 +51,7 @@
 #include <avr/sleep.h>
 #include <math.h>   // for pow and log10f
 
-#define VERSION "2.0"
+#define VERSION_EXAMPLE "2.0"
 
 //
 // ATMEL ATTINY85
@@ -64,6 +64,11 @@
 //                                        +----+
 
 #ifdef LOAD_ON_OFF_DETECTION
+#ifdef INFO
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__)
+#error "Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (outcomment) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45."
+#endif
+#endif
 /*
  * PIN 6 / PB1 / PCINT1 is used to detect if load is attached.
  * Detaching of load is detected by measuring current (PIN 2 / PB3) at middle of each half wave.
@@ -135,7 +140,7 @@ void setup(void) {
 #ifdef INFO
     // Print before debug output is switched to input
     // 35 characters which takes 3,3 millis at 115200 baud
-    writeString_P(PSTR("START\nVersion " VERSION " from  " __DATE__ "\n"));
+    writeString_P(PSTR("START " __FILE__ "\nVersion " VERSION_EXAMPLE " from  " __DATE__ "\n"));
 #endif
 
     /*

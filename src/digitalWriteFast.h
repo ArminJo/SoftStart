@@ -124,7 +124,7 @@
 (((P) >= 8 && (P) <= 11) ? (P) - 4 : (((P) >= 18 && (P) <= 21) ? 25 - (P) : (((P) == 0) ? 2 : (((P) == 1) ? 3 : (((P) == 2) ? 1 : (((P) == 3) ? 0 : (((P) == 4) ? 4 : (((P) == 6) ? 7 : (((P) == 13) ? 7 : (((P) == 14) ? 3 : (((P) == 15) ? 1 : (((P) == 16) ? 2 : (((P) == 17) ? 0 : (((P) == 22) ? 1 : (((P) == 23) ? 0 : (((P) == 24) ? 4 : (((P) == 25) ? 7 : (((P) == 26) ? 4 : (((P) == 27) ? 5 : 6 )))))))))))))))))))
 
 #else
-#if defined(__AVR_ATtiny85__)
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
 // we have only PORTB - Extension 01.03.2018
 #define __digitalPinToPortReg(P) (&PORTB)
 #define __digitalPinToDDRReg(P)  (&DDRB)
@@ -175,7 +175,7 @@ if (__builtin_constant_p(P) && __builtin_constant_p(V)) { \
 #endif
 
 #if !defined(pinModeFast)
-#if defined(__AVR_ATtiny85__)
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
 // we have only PORTB - Extension 01.03.2018
 #define pinModeFast(P, V) \
 if (__builtin_constant_p(P) && __builtin_constant_p(V)) { \

@@ -4,7 +4,7 @@ Generates TRIAC control pulse for soft start of motors used in circular saw, ang
 ### Implemented and tested for AVR-ATtiny85
 
 ## Download
-The actual version can be downloaded directly from GitHub [here](https://github.com/ArminJo/SoftStart/blob/master/TRIACRamp.zip?raw=true)
+The actual version can be downloaded directly from GitHub [here](https://github.com/ArminJo/SoftStart/blob/master/extras/TRIACRamp.zip?raw=true)
 
 ### After calling startRamp():
 - Wait for 8 zero crossings of zero crossing interrupt to synchronize timing and check for right frequency (50 or 60 Hz).

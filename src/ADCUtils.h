@@ -30,7 +30,7 @@
 #endif
 
 // Temperature channel definitions - 1 LSB / 1 degree Celsius
-#if defined(__AVR_ATtiny85__)
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
 #define ADC_TEMPERATURE_CHANNEL_MUX 15
 #define ADC_1_1_VOLT_CHANNEL_MUX 12
 #endif
