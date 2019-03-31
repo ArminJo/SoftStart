@@ -2,7 +2,8 @@
  * TinyUtils.h
  *
  *  Created on: 05.03.2018
- *      Author: Armin
+ *  Copyright (C) 2018  Armin Joachimsmeyer
+ *  armin.joachimsmeyer@gmail.com
  */
 
 //
@@ -17,6 +18,8 @@
 
 #ifndef TINYUTILS_H_
 #define TINYUTILS_H_
+
+#if defined (__AVR_ATtiny85__)
 
 #include <Arduino.h>
 #include <avr/io.h>
@@ -39,6 +42,8 @@
 #define TIMER1_CLOCK_DIVIDER_FOR_1_MICRO (1 << CS12)
 #endif
 
+void delayMilliseconds(unsigned int aMillis);
+
 /*
  * Only suitable for constant values
  * Loading of value adds 2 extra cycles (check .lss file for exact timing)
@@ -59,6 +64,8 @@ inline void delay4CyclesInlineExact(uint16_t a4Microseconds) {
     );
 }
 
+void PWMtone(uint8_t aPin, unsigned int aFrequency, unsigned long aDurationMillis = 0);
 void toneWithTimer1PWM(uint16_t aFrequency, bool aUseOutputB = false);
 
+#endif //  defined (__AVR_ATtiny85__)
 #endif /* TINYUTILS_H_ */

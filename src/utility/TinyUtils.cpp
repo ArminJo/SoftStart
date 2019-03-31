@@ -4,6 +4,7 @@
  *  Created on: 05.03.2018
  *      Author: Armin
  */
+#if defined (__AVR_ATtiny85__)
 
 #include "TinyUtils.h"
 #include <avr/io.h>
@@ -13,6 +14,12 @@
 #define INPUT 0x0
 #define OUTPUT 0x1
 #define INPUT_PULLUP 0x2
+
+void delayMilliseconds(unsigned int aMillis) {
+    for (unsigned int i = 0; i < aMillis; ++i) {
+        delayMicroseconds(1000);
+    }
+}
 
 /*
  * Use port pin number (PB0-PB5) not case or other pin number
@@ -33,10 +40,21 @@ inline bool digitalReadFastPortB(uint8_t aInputPinNumber) {
 
 // not for INPUT_PULLUP - can be done by setting to input and adding digitalWriteFastPortB(aOutputPinNumber,1);
 inline void pinModeFastPortB(uint8_t aOutputPinNumber, uint8_t aMode) {
-    (aMode ? DDRB |= (1 << aOutputPinNumber) : DDRB &= ~(1 << aOutputPinNumber));
+    (aMode ? DDRB |= (1 << aOutputPinNumber) /* OUTPUT */: DDRB &= ~(1 << aOutputPinNumber));
 }
 
 #if defined(GTCCR)
+
+/*
+ * Like tone(), but use OCR1B (PB4) + !OCR1B (PB3)
+ */
+void PWMtone(uint8_t aPin, unsigned int aFrequency, unsigned long aDurationMillis) {
+    tone(aPin, aFrequency / 2, aDurationMillis); // specify half frequency -> PWM doubles it
+    TCCR1 = TCCR1 & 0x0F; // reset mode and disconnect OC1A pins, keep only prescaler
+    GTCCR = (1 << PWM1B) | (1 << COM1B0); // Switch to PWM Mode with OCR1B (PB4) + !OCR1B (PB3) outputs enabled
+    OCR1B = OCR1C / 2; // set PWM to 50%
+}
+
 /*
  * initialize outputs and use PWM Mode
  * if aUseOutputB == false output frequency at Pin6/5 - PB1/PB0 - OCR1A/!OCR1A
@@ -68,3 +86,5 @@ void toneWithTimer1PWM(uint16_t aFrequency, bool aUseOutputB) {
     OCR1C = tOCR; // Frequency
 }
 #endif
+
+#endif //  defined (__AVR_ATtiny85__)

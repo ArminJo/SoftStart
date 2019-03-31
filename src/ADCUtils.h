@@ -2,7 +2,8 @@
  * ADCUtils.h
  *
  *  Created on: 23.02.2018
- *      Author: Armin
+ *  Copyright (C) 2018  Armin Joachimsmeyer
+ *  armin.joachimsmeyer@gmail.com
  */
 
 #ifndef SRC_ADCUTILS_H_
@@ -31,17 +32,35 @@
 
 // Temperature channel definitions - 1 LSB / 1 degree Celsius
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
+#define SHIFT_VALUE_FOR_REFERENCE REFS2
 #define ADC_TEMPERATURE_CHANNEL_MUX 15
 #define ADC_1_1_VOLT_CHANNEL_MUX 12
+#else
+#define SHIFT_VALUE_FOR_REFERENCE REFS0
 #endif
 #if defined (__AVR_ATmega328P__)
 #define ADC_TEMPERATURE_CHANNEL_MUX 8
 #define ADC_1_1_VOLT_CHANNEL_MUX 14
 #endif
+#if defined(__AVR_ATmega32U4__)
+#define ADC_TEMPERATURE_CHANNEL_MUX 0x27
+#define ADC_1_1_VOLT_CHANNEL_MUX 0x1E
+#endif
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1284__) || defined(__AVR_ATmega1284P__) || defined(__AVR_ATmega644__) || defined(__AVR_ATmega644A__) || defined(__AVR_ATmega644P__) || defined(__AVR_ATmega644PA__)
+#define ADC_1_1_VOLT_CHANNEL_MUX 0x1E
+#define INTERNAL INTERNAL1V1
+#endif
 
 uint16_t readADCChannel(uint8_t aChannelNumber);
-uint16_t readADCChannelWithReference(uint8_t aChannelNumber, uint8_t aVoltageReference);
+uint16_t readADCChannelWithReference(uint8_t aChannelNumber, uint8_t aReference);
 uint16_t readADCChannelWithOversample(uint8_t aChannelNumber, uint8_t aOversampleExponent);
-uint16_t readADCChannelWithReferenceOversample(uint8_t aChannelNumber, uint8_t aVoltageReference, uint8_t aOversampleExponent);
+uint16_t readADCChannelWithReferenceOversample(uint8_t aChannelNumber, uint8_t aReference, uint8_t aOversampleExponent);
+
+float getVCCVoltageSimple(void);
+uint16_t getVCCVoltageMillivoltSimple(void);
+float getTemperatureSimple(void);
+float getVCCVoltage(void);
+uint16_t getVCCVoltageMillivolt(void);
+float getTemperature(void);
 
 #endif /* SRC_ADCUTILS_H_ */
