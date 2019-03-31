@@ -54,12 +54,10 @@
 #define ZeroVoltageDetectionInput PB2   // generates interrupts at both edges
 
 #define LED_PIN PB1
-#ifdef TX_PIN
-#if (LED_PIN != TX_PIN)
+#if defined(TX_PIN) && defined(LED_PIN) && (LED_PIN != TX_PIN)
 #error "LED pin must be equal TX pin."
 #endif
-#endif
-// outcomment if no led for indicating ramp is used
+// comment out if no led for indicating ramp is used
 // #define RAMP_INDICATOR_LED LED_PIN
 
 /*
@@ -67,6 +65,9 @@
  */
 #define TIMER0_COUNTER_TOP 0xFF
 #define TIMER0_FAST_PWM ((1 << WGM01) | (1 << WGM00))
+
+#define TIMER_VALUE_FOR_FULL_POWER TIMER0_COUNTER_TOP
+#define OCRA_VALUE_FOR_NO_POWER 0xFE
 
 #if (F_CPU != 1000000) &&  (F_CPU != 8000000)
 #error "F_CPU value must be 1000000 or 8000000."
@@ -89,9 +90,10 @@
 // 0x4E. 78 * 128 us gives 9984 microseconds
 #define TOTAL_PHASE_SHIFT_COUNT (10000 / TIMER0_CLOCK_CYCLE_MICROS)
 #define HALF_WAVES_PER_SECOND 100
+#define DELAY_DECREMENT_FOR_A_ONE_SECOND_RAMP
 #endif
 
-#define TIMER_COUNT_AT_ZERO_CROSSING (TOTAL_PHASE_SHIFT_COUNT - 1) // -1 since timer starts with 0xFF
+#define TIMER_COUNT_AT_ZERO_CROSSING (TOTAL_PHASE_SHIFT_COUNT - 1) // 155 for 50Hz. -1 since timer starts with 0xFF
 
 // for plausibility check of voltage zero crossing detection. 6 => ~2 Hz/380 usec
 #define ALLOWED_DELTA_PHASE_SHIFT_COUNT 6
@@ -177,7 +179,7 @@ union Mylong {
 
 struct RampControlStruct {
     volatile uint8_t SoftStartState;
-    bool CalibrationModeActive;
+    bool CalibrationModeActive; // output actual counter forever in order to adjust the 50% duty cycle trimmer for the mains 50/60Hz trigger generation
 
     /*
      * Timer
@@ -223,8 +225,11 @@ struct RampControlStruct {
 extern RampControlStruct RampControl;
 
 void initRampControl();
+void setRampDurationSeconds(uint16_t aRampDurationSeconds);
+void setRampDurationMillis(uint32_t aRampDurationMillis);
 void startRamp();
 void stopRamp();
+void switchToFullPower();
 void setCalibrationMode();
 void checkAndHandleCounterOverflowForLoop();
 void printRampInfo();

@@ -37,8 +37,8 @@
  * Extended=0XFF (default)
  *
  */
-#define LOAD_ON_OFF_DETECTION // Do not start with ramp at boot up time, but wait for interrupt at LoadDetectionInput pin 6.
 
+#define LOAD_ON_OFF_DETECTION // Do not start with ramp at boot up time, but wait for interrupt at LoadDetectionInput pin 6.
 #include "TRIACRamp.h"
 
 #include "TinyUtils.h"
@@ -66,7 +66,7 @@
 #ifdef LOAD_ON_OFF_DETECTION
 #ifdef INFO
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__)
-#error "Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (outcomment) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45."
+#error "Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (comment out) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45."
 #endif
 #endif
 /*
@@ -140,14 +140,14 @@ void setup(void) {
 #ifdef INFO
     // Print before debug output is switched to input
     // 35 characters which takes 3,3 millis at 115200 baud
-    writeString_P(PSTR("START " __FILE__ "\nVersion " VERSION_EXAMPLE " from  " __DATE__ "\n"));
+    writeString(F("START " __FILE__ "\nVersion " VERSION_EXAMPLE " from " __DATE__ "\n"));
 #endif
 
     /*
      * Read value from external trimmer now in order to check for calibration mode (value < TEST_MODE_MAX_ADC_VALUE)
      */
     if (readADCChannelWithOversample(RampDurationADCChannel, 4) < TEST_MODE_MAX_ADC_VALUE) {
-        writeString_P(PSTR("Activate calibration mode\n"));
+        writeString(F("Activate calibration mode\n"));
         RampControl.CalibrationModeActive = true;
     }
 
@@ -161,7 +161,7 @@ void setup(void) {
     SoftStartControl.ZeroCurrentADCReferenceValue = tZeroCurrentADCReferenceValue;
 #ifdef INFO
     SoftStartControl.ZeroCurrentADCReferenceValueAtLastPrint = tZeroCurrentADCReferenceValue;
-    writeString_P(PSTR("ZeroCurrentReferenceValue="));
+    writeString(F("ZeroCurrentReferenceValue="));
     writeUnsignedInt(tZeroCurrentADCReferenceValue);
     write1Start8Data1StopNoParity('\n');
 #endif
@@ -177,7 +177,7 @@ void setup(void) {
 #else // LOAD_ON_OFF_DETECTION
     readRampDelay();
 #ifdef INFO
-    writeString_P(PSTR("Delay="));
+    writeString(F("Delay="));
     writeLong(RampControl.DelayDecrement);
     write1Start8Data1StopNoParity('\n');
 #endif
@@ -243,16 +243,18 @@ int main(void) {
 
 /*
  * Read ramp duration. Use x^2 function to get better resolution at low input values.
- * +8 gives 0x40 at a reading of 0 -> 5 second ramp
+ * convert to 0 -> 5 second ramp
  */
 void readRampDelay() {
     float tValue = readADCChannelWithOversample(RampDurationADCChannel, 4);
     tValue = tValue / (1024 / 1.2); // gives range 0,00469 to 1.8 since input values < 4 leads to test mode
     tValue = tValue + 1.8; // gives range 1.80469 to 3
-    RampControl.DelayDecrement = pow(10, tValue); // gives 63,78 to 1000
-    RampControl.DelayDecrement = (RampControl.DelayDecrement - 53) << 8; // gives (10 to ~1000) << 8
+    uint32_t tRampMillis = pow(17, tValue); // gives 163,78 to 4913
+    setRampDurationMillis(tRampMillis);
 #ifdef INFO
-    writeString("Delay=");
+    writeString("RampMillis=");
+    writeLong(tRampMillis);
+    writeString(" DelayDecrement=");
     writeLong(RampControl.DelayDecrement);
     write1Start8Data1StopNoParity('\n');
 #endif
@@ -282,7 +284,7 @@ void setLoadAttached(void) {
     pinModeFast(TRIACControlOutput, OUTPUT);
 
 #ifdef INFO
-    writeString_P(PSTR("Start\n"));
+    writeString(F("Start\n"));
 #endif
     // get maybe changed value for next turn
     readRampDelay();
@@ -299,7 +301,7 @@ void setLoadDetached(void) {
 // enable pcint and disable timer interrupts
 // First write last message
 #if defined(INFO)
-    writeString_P(PSTR("Switch OFF and wait for load attached\n"));
+    writeString(F("Switch OFF and wait for load attached\n"));
 #endif
 // Then switch TX debug to input (without pullup) for pcint
     digitalWriteFast(LoadDetectionInput, LOW);

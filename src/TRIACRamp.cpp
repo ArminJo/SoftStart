@@ -87,7 +87,7 @@ void initRampControl() {
 #endif
     TCNT0 = 0;
 
-    RampControl.NextOCRA = 0xFE; // to avoid triggering the TRIAC - 0xFF means full power mode with no minimal phase count and should not be used here
+    RampControl.NextOCRA = OCRA_VALUE_FOR_NO_POWER; // to avoid triggering the TRIAC - 0xFF means full power mode with no minimal phase count and should not be used here
     RampControl.SoftStartState = STATE_STOP;
     RampControl.DoWriteRampData = false;
     RampControl.CalibrationModeActive = false;
@@ -120,7 +120,7 @@ void startRamp(void) {
 
 void stopRamp() {
     RampControl.SoftStartState = STATE_STOP;
-    RampControl.NextOCRA = 0xFE; // Otherwise is sticks at full power.
+    RampControl.NextOCRA = OCRA_VALUE_FOR_NO_POWER; // Otherwise it sticks at full power.
     TIMSK = 0; // All Timer interrupts disabled
     TIFR = (1 << OCF0A) | (1 << TOV1); // Clear Timer0 output compare match int  + Timer1 overflow int
 
@@ -133,8 +133,37 @@ void stopRamp() {
 #endif
 }
 
+void switchToFullPower() {
+    RampControl.SoftStartState = STATE_FULL_POWER;
+    RampControl.MicrosecondsDelayForTriggerPulse = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverflow"
+// truncation is intended!
+    RampControl.NextOCRA = TIMER0_COUNTER_TOP + MINIMUM_PHASE_SHIFT_COUNT;
+#pragma GCC diagnostic pop
+}
+
 void setCalibrationMode() {
     RampControl.CalibrationModeActive = true;
+}
+
+void setRampDurationSeconds(uint16_t aRampDurationSeconds) {
+    uint32_t tValue = ((uint32_t)TIMER_COUNT_AT_ZERO_CROSSING << 16) / HALF_WAVES_PER_SECOND; // 0x00018CCC
+    if (aRampDurationSeconds == 0) {
+        RampControl.DelayDecrement = tValue * 4; // Quarter of a second
+    } else {
+        RampControl.DelayDecrement = tValue / aRampDurationSeconds;
+    }
+}
+
+void setRampDurationMillis(uint32_t aRampDurationMillis) {
+    // instead of *1000 use *100 and /10 in divisor to avoid 32 bit overflow
+    uint32_t tValue = (((uint32_t)TIMER_COUNT_AT_ZERO_CROSSING << 16) * 100) / (HALF_WAVES_PER_SECOND / 10); // 0x060E0000
+    if (aRampDurationMillis == 0) {
+        RampControl.DelayDecrement = ((uint32_t)TIMER_COUNT_AT_ZERO_CROSSING << 16) / 4; // 4 mains periods to full power
+    } else {
+        RampControl.DelayDecrement = tValue / aRampDurationMillis;
+    }
 }
 
 /*
@@ -166,7 +195,7 @@ ISR(INT0_vect) {
     /*
      * Now begin state machine
      */
-    if (RampControl.NextOCRA == 0xFF) {
+    if (RampControl.NextOCRA == TIMER_VALUE_FOR_FULL_POWER) {
         // STATE_FULL_POWER with MINIMUM_PHASE_SHIFT_COUNT == 0 here.
         // Here no additional delay, no timer counting from 0xFF to 0x00,
         // so there is a step in delay from last ramp delay to full power of (measured) 160 microseconds
@@ -309,14 +338,7 @@ ISR(INT0_vect) {
                 /*
                  * End of ramp -> switch to full power
                  */
-                RampControl.SoftStartState = STATE_FULL_POWER;
-                RampControl.MicrosecondsDelayForTriggerPulse = 0;
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
-                // truncation is intended!
-                RampControl.NextOCRA = 0xFF + MINIMUM_PHASE_SHIFT_COUNT;
-#pragma GCC diagnostic pop
+                switchToFullPower();
 #ifdef RAMP_INDICATOR_LED
                 // switch LED off
                 digitalWriteFast(LED_PIN, 1);
@@ -352,7 +374,7 @@ void StartTriacPulse(void) {
 #endif
     RampControl.TRIACPulseCount = 1;
 
-    // start timer1 to end pulse
+// start timer1 to end pulse
     GTCCR = (1 << PSR1); // reset prescaler
     TCNT1 = 0x100 - (TRIAC_PULSE_WIDTH_MICROS / TRIAC_PULSE_TIMER_CLOCK_CYCLE_MICROS);
     TCCR1 = TIMER1_CLOCK_DIVIDER; // normal mode -> gives maximum TRIAC pulse width of 1 Milliseconds for timer clock 4 us and count to 256.
@@ -380,7 +402,7 @@ ISR(TIMER1_OVF_vect) {
         digitalWriteFast(TRIACControlOutput, 1);
         uint8_t tTCNT0 = TCNT0;
         if (RampControl.TRIACPulseCount < TRIAC_PULSE_NUMBERS
-                && (tTCNT0 == 0xFF || tTCNT0 < (TRIAC_MULTIPLE_PULSE_TIME_MICROS / TIMER0_CLOCK_CYCLE_MICROS))) {
+                && (tTCNT0 == TIMER_VALUE_FOR_FULL_POWER || tTCNT0 < (TRIAC_MULTIPLE_PULSE_TIME_MICROS / TIMER0_CLOCK_CYCLE_MICROS))) {
             /*
              *  output multiple TRIAC pulse since remaining delay is less than total time of multiple pulses
              */
@@ -425,8 +447,9 @@ void checkAndHandleCounterOverflowForLoop() {
          * Check for counter overflow if load attached, but not in test/calibration mode
          */
         uint8_t tActualTimerCount = TCNT0;
-        if (tActualTimerCount >= RampControl.MainsHalfWaveTimerCount + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2)
-                && tActualTimerCount < 0XFF) {
+        if (tActualTimerCount
+                >= RampControl.MainsHalfWaveTimerCount
+                        + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2)&& tActualTimerCount < TIMER_VALUE_FOR_FULL_POWER) {
             // assume missing trigger -> setup counter for next period
             TCNT0 = tActualTimerCount - RampControl.MainsHalfWaveTimerCount;
 #ifdef ERROR
