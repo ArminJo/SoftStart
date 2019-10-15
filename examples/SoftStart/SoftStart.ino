@@ -26,14 +26,14 @@
  * Voltage trigger interrupt is only enabled if load is attached.
  *
  * FUSE VALUES for LOAD_ON_OFF_DETECTION which means that CPU power is always on.
- * You may use the default values or enable additional Brown-out detection eg. at 4.3 Volt.
- * Low=0X62 (default) Int RC Osc. 8 MHz divided by 8. 14 Clk + 64ms startup.
- * High=0XDC BrowOut at VCC=4.3Volt
+ * You may use the default values or enable additional Brown-out detection eg. at 4.3 volt.
+ * Low=0X62 (default) Int RC Osc. 8 MHz divided by 8. 14 Clk + 64 ms startup.
+ * High=0XDC BrowOut at VCC=4.3 volt
  * Extended=0XFF (default)
  *
  * FUSE VALUES for embedded version, which requires fast start, since soft start must begin as soon as power is on -> 14 Clk + Enable BOD
- * Low=0X52 Int RC Osc. 8 MHz divided by 8 (default). 14 Clk + 4ms startup (for fast startup).
- * High=0XDC BrowOut at VCC=4.3Volt
+ * Low=0X52 Int RC Osc. 8 MHz divided by 8 (default). 14 Clk + 4 ms startup (for fast startup).
+ * High=0XDC BrowOut at VCC=4.3 volt
  * Extended=0XFF (default)
  *
  */
@@ -58,7 +58,7 @@
 //
 //                                        +-\/-+
 //                  RESET ADC0 (D5) PB5  1|    |8  Vcc
-//        Ramp Duration - ADC3 (D3) PB3  2|    |7  PB2 (D2) INT0/ADC1 - Zero Voltage Crossing Sense
+//        Ramp Duration - ADC3 (D3) PB3  2|    |7  PB2 (D2) INT0/ADC1 - Zero voltage Crossing Sense
 // (Zero) Current Sense - ADC2 (D4) PB4  3|    |6  PB1 (D1) MISO/DO/AIN1/OC0B/OC1A/PCINT1 - Load switch on detect / TX Debug output
 //                                  GND  4|    |5  PB0 (D0) OC0A - TRIAC Control
 //                                        +----+
@@ -263,7 +263,7 @@ void readRampDelay() {
 #ifdef LOAD_ON_OFF_DETECTION
 /*
  * Load attached, stop triggering TRIAC and reset state
- * Enable Voltage zero crossing interrupt - Disable load detection interrupt
+ * Enable voltage zero crossing interrupt - Disable load detection interrupt
  */
 void setLoadAttached(void) {
     // Enable INT0, disable all pcint interrupts

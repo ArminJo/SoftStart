@@ -28,17 +28,17 @@
  * - STATE_RAMP -> Output TRIAC pulse and decrease pulse delay from `START_PHASE_SHIFT_DEGREES` to 0 degree at every voltage zero crossing.
  * - STATE_FULL_POWER -> Output TRIAC pulse pulse at zero crossing of AC line. The multi pulse (3*350 micro seconds) will cover small delays of current zero crossing.
  *
- * Calibration mode outputs actual phase counter forever (at 115200 Baud (@1MHZ) at pin 6 / PB1) in order to adjust the 50% duty cycle trimmer.
+ * Calibration mode outputs actual phase counter forever (at 115200 Baud (@1 MHZ) at pin 6 / PB1) in order to adjust the 50% duty cycle trimmer.
  * Format: <counterForPositiveHalfWave>|<counterForNegativeHalfWave>\n
  *
  * INTERNALS:
- * Current Voltage is biased by VCC/2 by two resistors in order to be able to measure also negative current.
+ * Current voltage is biased by VCC/2 by two resistors in order to be able to measure also negative current.
  * Mains triggers the interrupt pin on every edge.
  * 50 Hz gives 10 milliseconds cycle of mains and 156 * 64 microsecond clock cycles (9984 microseconds)
  * 60 Hz gives 8.33 milliseconds cycle of mains and 130 * 64 microsecond clock cycles (8320 microseconds)
  *
- * Timer0 runs in Fast PWM Mode starting at FF every 50/60Hz half cycle and counting up. It is never stopped, only interrupts are disabled.
- * - At startup the counter is used to determine length of 50/60Hz half cycle which compensates for internal oscillator drift.
+ * Timer0 runs in Fast PWM Mode starting at FF every 50/60 Hz half cycle and counting up. It is never stopped, only interrupts are disabled.
+ * - At startup the counter is used to determine length of 50/60 Hz half cycle which compensates for internal oscillator drift.
  * - During ramp the timer is set to generate Interrupts after zero crossing, which turns on the TRIAC.
  * Timer1 is used for generating the width of TRIAC pulse. TRIAC is turned off after a delay implemented by CounterOverflow.
  * Timer1 also implements the breaks and the pulses for multiple TRIAC pulses by CounterOverflow.
@@ -97,7 +97,7 @@ void initRampControl() {
 
 /*
  * Stop triggering TRIAC and reset ramp state
- * Enable Voltage zero crossing interrupt for ramp generation.
+ * Enable voltage zero crossing interrupt for ramp generation.
  */
 void startRamp(void) {
     RampControl.HalfWaveCounterIntern = 0;

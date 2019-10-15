@@ -1,6 +1,7 @@
 # SoftStart / TRIACRamp library
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Hit Counter](https://hitcounter.pythonanywhere.com/count/tag.svg?url=https%3A%2F%2Fgithub.com%2FArminJo%2FSoftStart)](https://github.com/brentvollebregt/hit-counter)
 
 Generates TRIAC control pulse for soft start of motors used in circular saw, angle grinder and other DIY tools.
 

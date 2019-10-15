@@ -19,7 +19,7 @@
 #ifndef TINYUTILS_H_
 #define TINYUTILS_H_
 
-#if defined (__AVR_ATtiny85__)
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__) || defined(__AVR_ATtiny87__) || defined(__AVR_ATtiny167__)
 
 #include <Arduino.h>
 #include <avr/io.h>
@@ -42,8 +42,6 @@
 #define TIMER1_CLOCK_DIVIDER_FOR_1_MICRO (1 << CS12)
 #endif
 
-void delayMilliseconds(unsigned int aMillis);
-
 /*
  * Only suitable for constant values
  * Loading of value adds 2 extra cycles (check .lss file for exact timing)
@@ -57,15 +55,19 @@ void delayMilliseconds(unsigned int aMillis);
  * 6 -> 23(+2) cycles
  */
 inline void delay4CyclesInlineExact(uint16_t a4Microseconds) {
-    // the following loop takes 4 cycles (4 microseconds  at 1MHz) per iteration
+    // the following loop takes 4 cycles (4 microseconds  at 1 MHz) per iteration
     __asm__ __volatile__ (
             "1: sbiw %0,1" "\n\t"    // 2 cycles
             "brne .-4" : "=w" (a4Microseconds) : "0" (a4Microseconds)// 2 cycles
     );
 }
-
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
 void PWMtone(uint8_t aPin, unsigned int aFrequency, unsigned long aDurationMillis = 0);
 void toneWithTimer1PWM(uint16_t aFrequency, bool aUseOutputB = false);
+#endif
+
+void changeDigisparkClock();
+
 
 #endif //  defined (__AVR_ATtiny85__)
 #endif /* TINYUTILS_H_ */

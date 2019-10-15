@@ -18,22 +18,9 @@
 //#define DEBUG // for debug output
 #define INFO  // for info output - delay, load detaching values
 //#define ERROR   // print error output - count overflow/missing zero crossing trigger
+#include "DebugLevel.h"  // Propagate debug level
 
-// Propagate debug level
-#ifdef TRACE
-#define DEBUG
-#endif
-#ifdef DEBUG
-#define INFO
-#endif
-#ifdef INFO
-#define WARN
-#endif
-#ifdef WARN
-#define ERROR
-#endif
-
-// if used for 60 instead of 50 Hz mains uncomment the next line
+// if used for 60 Hz instead of 50 Hz mains comment out the next line
 //#define MAINS_HAVE_60_HZ
 
 //
@@ -93,7 +80,7 @@
 #define DELAY_DECREMENT_FOR_A_ONE_SECOND_RAMP
 #endif
 
-#define TIMER_COUNT_AT_ZERO_CROSSING (TOTAL_PHASE_SHIFT_COUNT - 1) // 155 for 50Hz. -1 since timer starts with 0xFF
+#define TIMER_COUNT_AT_ZERO_CROSSING (TOTAL_PHASE_SHIFT_COUNT - 1) // 155 for 50 Hz. -1 since timer starts with 0xFF
 
 // for plausibility check of voltage zero crossing detection. 6 => ~2 Hz/380 usec
 #define ALLOWED_DELTA_PHASE_SHIFT_COUNT 6
@@ -107,7 +94,7 @@
 /*
  * Trigger impulse timing
  */
-#define TIMER1_CLOCK_DIVIDER TIMER1_CLOCK_DIVIDER_FOR_8_MICROS // gives max 2ms trigger pulse
+#define TIMER1_CLOCK_DIVIDER TIMER1_CLOCK_DIVIDER_FOR_8_MICROS // gives max 2 ms trigger pulse
 #define TRIAC_PULSE_TIMER_CLOCK_CYCLE_MICROS 8
 
 /*
@@ -179,7 +166,7 @@ union Mylong {
 
 struct RampControlStruct {
     volatile uint8_t SoftStartState;
-    bool CalibrationModeActive; // output actual counter forever in order to adjust the 50% duty cycle trimmer for the mains 50/60Hz trigger generation
+    bool CalibrationModeActive; // output actual counter forever in order to adjust the 50% duty cycle trimmer for the mains 50/60 Hz trigger generation
 
     /*
      * Timer
