@@ -41,9 +41,9 @@
 #define LOAD_ON_OFF_DETECTION // Do not start with ramp at boot up time, but wait for interrupt at LoadDetectionInput pin 6.
 #include "TRIACRamp.h"
 
-#include "TinyUtils.h"
+#include "ATtinyUtils.h"
 #include "ADCUtils.h"
-#include "TinySerialOut.h"
+#include "ATtinySerialOut.h"
 
 #include "digitalWriteFast.h"
 

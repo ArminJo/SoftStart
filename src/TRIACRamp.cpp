@@ -55,12 +55,12 @@
 
 #include <Arduino.h>
 #include "TRIACRamp.h"
-#include "TinyUtils.h"
+#include "ATtinyUtils.h"
 
 #include <avr/io.h>
 #include "digitalWriteFast.h"
 
-#include "TinySerialOut.h"
+#include "ATtinySerialOut.h"
 
 void initRampControl() {
     // Pin is active LOW, so set them to HIGH initially
