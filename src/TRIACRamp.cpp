@@ -24,9 +24,9 @@
  *
  *
  * On ramp start:
- * - STATE_WAIT_FOR_SETTLING -> - Wait for 8 zero crossings of zero crossing interrupt to synchronize timing and check for right frequency (50 or 60 Hz).
- * - STATE_RAMP -> Output TRIAC pulse and decrease pulse delay from `START_PHASE_SHIFT_DEGREES` to 0 degree at every voltage zero crossing.
- * - STATE_FULL_POWER -> Output TRIAC pulse pulse at zero crossing of AC line. The multi pulse (3*350 micro seconds) will cover small delays of current zero crossing.
+ * - TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING -> - Wait for 8 zero crossings of zero crossing interrupt to synchronize timing and check for right frequency (50 or 60 Hz).
+ * - STATE_RAMP -> Output TRIAC pulse and decrease pulse delay from `START_PHASE_SHIFT_DEGREES` to MINIMUM_PHASE_SHIFT_COUNT (0 degree) at every voltage zero crossing.
+ * - TRIAC_CONTROL_STATE_FULL_POWER -> Output TRIAC pulse pulse at zero crossing of AC line. The multi pulse (3*350 micro seconds) will cover small delays of current zero crossing.
  *
  * Calibration mode outputs actual phase counter forever (at 115200 Baud (@1 MHZ) at pin 6 / PB1) in order to adjust the 50% duty cycle trimmer.
  * Format: <counterForPositiveHalfWave>|<counterForNegativeHalfWave>\n
@@ -78,17 +78,17 @@ void initRampControl() {
 // Fast PWM mode
     TCCR0A = TIMER0_FAST_PWM;
 #if (F_CPU == 1000000)
-    //Start Timer 0 1Mhz/64 -> 64 us clock -> gives 156 counts for 10 ms
+    //Start Timer 0 1MHz/64 -> 64 us clock -> gives 156 counts for 10 ms
     TCCR0B = TIMER0_CLOCK_DIVIDER_FOR_64_MICROS;
 #endif
 #if (F_CPU == 8000000)
-    //Start Timer 0 8Mhz/10254 -> 128 us clock -> gives 78 counts for 10 ms
+    //Start Timer 0 8MHz/10254 -> 128 us clock -> gives 78 counts for 10 ms
     TCCR0B = TIMER0_CLOCK_DIVIDER_FOR_128_MICROS;
 #endif
     TCNT0 = 0;
 
     RampControl.NextOCRA = OCRA_VALUE_FOR_NO_POWER; // to avoid triggering the TRIAC - 0xFF means full power mode with no minimal phase count and should not be used here
-    RampControl.SoftStartState = STATE_STOP;
+    RampControl.SoftStartState = TRIAC_CONTROL_STATE_STOP;
     RampControl.DoWriteRampData = false;
     RampControl.CalibrationModeActive = false;
     // TODO use EEPROM for this value
@@ -114,12 +114,12 @@ void startRamp(void) {
     // switch LED on
     digitalWriteFast(LED_PIN, 0);
 #endif
-    RampControl.SoftStartState = STATE_WAIT_FOR_SETTLING;
+    RampControl.SoftStartState = TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING;
 
 }
 
 void stopRamp() {
-    RampControl.SoftStartState = STATE_STOP;
+    RampControl.SoftStartState = TRIAC_CONTROL_STATE_STOP;
     RampControl.NextOCRA = OCRA_VALUE_FOR_NO_POWER; // Otherwise it sticks at full power.
     TIMSK = 0; // All Timer interrupts disabled
     TIFR = (1 << OCF0A) | (1 << TOV1); // Clear Timer0 output compare match int  + Timer1 overflow int
@@ -134,7 +134,7 @@ void stopRamp() {
 }
 
 void switchToFullPower() {
-    RampControl.SoftStartState = STATE_FULL_POWER;
+    RampControl.SoftStartState = TRIAC_CONTROL_STATE_FULL_POWER;
     RampControl.MicrosecondsDelayForTriggerPulse = 0;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverflow"
@@ -171,13 +171,13 @@ void setRampDurationMillis(uint32_t aRampDurationMillis) {
  * The actual delay of the TRIAC pulse for this half wave was computed in the interrupt of the half wave before!
  *
  * Counter is set to FF in order to reload RampControl.NextOCRA immediately at next clock.
- * STATE_STOP -> Just count interrupts
- * STATE_WAIT_FOR_SETTLING -> Timer0 is used to measure the period between the line interrupts.
+ * TRIAC_CONTROL_STATE_STOP -> Just count interrupts
+ * TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING -> Timer0 is used to measure the period between the line interrupts.
  *                            Compute mains period clock cycles and prepare first TRIAC pulse.
  * STATE_RAMP -> Delay is implemented by Timer0 counting up until RampControl.NextOCRA is reached.
  *               This in turn generates an interrupt which switches TRIAC on. Timer1 is used for generating the TRIAC pulse(s).
  *               RampControl.NextOCRA is decreased every voltage zero crossing.
- * STATE_FULL_POWER -> to keep it simple just change nothing, use old values already set.
+ * TRIAC_CONTROL_STATE_FULL_POWER -> to keep it simple just change nothing, use old values already set.
  */
 
 ISR(INT0_vect) {
@@ -196,7 +196,7 @@ ISR(INT0_vect) {
      * Now begin state machine
      */
     if (RampControl.NextOCRA == TIMER_VALUE_FOR_FULL_POWER) {
-        // STATE_FULL_POWER with MINIMUM_PHASE_SHIFT_COUNT == 0 here.
+        // TRIAC_CONTROL_STATE_FULL_POWER with MINIMUM_PHASE_SHIFT_COUNT == 0 here.
         // Here no additional delay, no timer counting from 0xFF to 0x00,
         // so there is a step in delay from last ramp delay to full power of (measured) 160 microseconds
         StartTriacPulse();
@@ -206,7 +206,7 @@ ISR(INT0_vect) {
     }
     RampControl.HalfWaveCounterForExternalTiming++;
 
-    if (RampControl.SoftStartState == STATE_STOP) {
+    if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_STOP) {
         // do nothing;
         return;
     }
@@ -240,9 +240,9 @@ ISR(INT0_vect) {
         return;
     }
 
-    if (RampControl.SoftStartState == STATE_WAIT_FOR_SETTLING) {
+    if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING) {
         /*******************************************************************
-         * STATE_WAIT_FOR_SETTLING -> measure period and get delay at last
+         * TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING -> measure period and get delay at last
          *******************************************************************/
         if (RampControl.HalfWaveCounterIntern == 0) {
             /*
@@ -272,10 +272,10 @@ ISR(INT0_vect) {
             RampControl.NextMicrosecondsDelayForTriggerPulse = 0;
 
             TIFR = (1 << OCF0A) | (1 << TOV1);    // Otherwise an interrupt is generated directly
-            TCCR1 = 0; // stop timer 1 - is needed here even if no one starts it before
+            TCCR1 = 0; // stop timer 1 - is required here even if no one starts it before
             TIMSK = (1 << OCIE0A) | (1 << TOIE1); // Timer0 output compare match int enabled + Timer1 overflow int enabled
 
-            RampControl.SoftStartState = STATE_RAMP_UP;
+            RampControl.SoftStartState = TRIAC_CONTROL_STATE_RAMP_UP;
 #ifdef INFO
             write1Start8Data1StopNoParity('M');
             write1Start8Data1StopNoParity('P');
@@ -285,7 +285,7 @@ ISR(INT0_vect) {
         }
         RampControl.HalfWaveCounterIntern++;
 
-    } else if (RampControl.SoftStartState == STATE_RAMP_UP) {
+    } else if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_RAMP_UP) {
         /*
          * Use narrower plausibility values here for the (10 millis) mains cycle. If not met, just do nothing and wait for next transition,
          * main loop will handle counter overflow.
@@ -304,7 +304,7 @@ ISR(INT0_vect) {
 #endif
         } else {
             /*
-             * STATE_RAMP_UP  && No noise
+             * TRIAC_CONTROL_STATE_RAMP_UP  && No noise
              */
             if ((RampControl.TimerCountForTriggerDelayShift16.word.HighWord) > MINIMUM_PHASE_SHIFT_COUNT) {
                 /*
@@ -345,9 +345,9 @@ ISR(INT0_vect) {
 #endif
             }
         }
-    } else /*if (sZeroCrossingState == STATE_FULL_POWER)*/{
+    } else /*if (sZeroCrossingState == TRIAC_CONTROL_STATE_FULL_POWER)*/{
         /*
-         * STATE_FULL_POWER here -> to keep it simple, just change nothing, use values already set at end of ramp.
+         * TRIAC_CONTROL_STATE_FULL_POWER here -> to keep it simple, just change nothing, use values already set at end of ramp.
          */
     }
 }
@@ -387,7 +387,7 @@ void StartTriacPulse(void) {
 ISR(TIMER1_OVF_vect) {
     TCCR1 = 0; // stop timer 1
 
-    if (RampControl.SoftStartState == STATE_STOP) {
+    if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_STOP) {
         /*
          * Other Timer1 usage (e.g.Tone scan mode) here, just return after timer stopped. Next slope will start timer again.
          */
@@ -453,7 +453,7 @@ void checkAndHandleCounterOverflowForLoop() {
             // assume missing trigger -> setup counter for next period
             TCNT0 = tActualTimerCount - RampControl.MainsHalfWaveTimerCount;
 #ifdef ERROR
-            if (RampControl.SoftStartState != STATE_STOP) {
+            if (RampControl.SoftStartState != TRIAC_CONTROL_STATE_STOP) {
                 write1Start8Data1StopNoParityWithCliSei('O');
                 write1Start8Data1StopNoParityWithCliSei('F');
                 write1Start8Data1StopNoParityWithCliSei(tActualTimerCount);

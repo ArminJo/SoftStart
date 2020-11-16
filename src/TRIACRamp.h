@@ -42,7 +42,7 @@
 
 #define LED_PIN PB1
 #if defined(TX_PIN) && defined(LED_PIN) && (LED_PIN != TX_PIN)
-#error "LED pin must be equal TX pin."
+#error LED pin must be equal TX pin.
 #endif
 // comment out if no led for indicating ramp is used
 // #define RAMP_INDICATOR_LED LED_PIN
@@ -57,7 +57,7 @@
 #define OCRA_VALUE_FOR_NO_POWER 0xFE
 
 #if (F_CPU != 1000000) &&  (F_CPU != 8000000)
-#error "F_CPU value must be 1000000 or 8000000."
+#error F_CPU value must be 1000000 or 8000000.
 #endif
 
 #if (F_CPU == 1000000)
@@ -114,16 +114,16 @@
 #define TRIAC_PULSE_BREAK_MICROS 400
 
 // Initial delay of TRIAC trigger impulse.
-// Values from 0 - 180 degrees, but the extremes makes no sense
+// Values from 0 - 180 degrees, but the extremes make no sense
 #define START_PHASE_SHIFT_DEGREES 160
 
 #define START_PHASE_SHIFT_MARGIN_COUNT ((TOTAL_PHASE_SHIFT_COUNT * (180 - START_PHASE_SHIFT_DEGREES)) / 180)
 #if (START_PHASE_SHIFT_DEGREES < 45)
-#error "START_PHASE_SHIFT_DEGREES below 45 degree makes no sense."
+#error START_PHASE_SHIFT_DEGREES below 45 degree makes no sense.
 #endif
 #define START_PHASE_SHIFT_MARGIN_MICROS (((1000000 / HALF_WAVES_PER_SECOND) * (180 - START_PHASE_SHIFT_DEGREES)) / 180) // only used for plausi below
 #if  (TRIAC_PULSE_WIDTH_MICROS > (START_PHASE_SHIFT_MARGIN_MICROS + 20))
-#error "START_PHASE_SHIFT_DEGREES is too high. The TRIAC pulse may reach the next half wave"
+#error START_PHASE_SHIFT_DEGREES is too high. The TRIAC pulse may reach the next half wave
 #endif
 
 // Timer0 count at end of ramp - Can be adjusted for testing
@@ -157,12 +157,12 @@ union Mylong {
 /*
  * States of the state machine
  */
-#define STATE_STOP 0
-#define STATE_OUTPUT_COUNTER 1 // output actual counter forever in order to adjust the 50% duty cycle trimmer
-#define STATE_WAIT_FOR_SETTLING 2
-#define STATE_RAMP_UP 3
-#define STATE_RAMP_DOWN 4 // for future use
-#define STATE_FULL_POWER 5
+#define TRIAC_CONTROL_STATE_STOP 0
+#define TRIAC_CONTROL_STATE_OUTPUT_COUNTER 1 // output actual counter forever in order to adjust the 50% duty cycle trimmer
+#define TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING 2
+#define TRIAC_CONTROL_STATE_RAMP_UP 3
+#define TRIAC_CONTROL_STATE_RAMP_DOWN 4 // for future use
+#define TRIAC_CONTROL_STATE_FULL_POWER 5
 
 struct RampControlStruct {
     volatile uint8_t SoftStartState;
@@ -171,7 +171,7 @@ struct RampControlStruct {
     /*
      * Timer
      */
-    uint8_t NextOCRA; // Next Timer value to be set - if equals 0xFF then no delay is assumed => STATE_FULL_POWER
+    uint8_t NextOCRA; // Next Timer value to be set - if equals 0xFF then no delay is assumed => TRIAC_CONTROL_STATE_FULL_POWER
     /*
      * Since the counter has a resolution of 64 us (and you can see this brightness steps) we use this to get a finer resolution.
      */

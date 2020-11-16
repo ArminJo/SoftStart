@@ -66,7 +66,7 @@
 #ifdef LOAD_ON_OFF_DETECTION
 #ifdef INFO
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__)
-#error "Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (comment out) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45."
+#error Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (comment out) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45.
 #endif
 #endif
 /*
@@ -78,7 +78,7 @@
 #define LoadDetectionInput PB1          // Pin6 - Used as TX debug output as long as load is detected by sensing current.
 #ifdef TX_PIN
 #if (LoadDetectionInput != TX_PIN)
-#error "Load detection pin must be equal TX pin."
+#error Load detection pin must be equal TX pin.
 #endif
 #endif // TX_PIN
 #endif
@@ -184,8 +184,7 @@ void setup(void) {
     startRamp();
 #endif // LOAD_ON_OFF_DETECTION
 
-    // enable interrupts
-    sei();
+    interrupts(); // Enable interrupts
 }
 
 /* Actions for LOAD_ON_OFF_DETECTION
@@ -204,10 +203,10 @@ void loop(void) {
     /*
      * Take 1 sample at middle of current period to determine if load is still attached
      */
-    if (SoftStartControl.isLoadAttached && RampControl.SoftStartState == STATE_FULL_POWER
+    if (SoftStartControl.isLoadAttached && RampControl.SoftStartState == TRIAC_CONTROL_STATE_FULL_POWER
             && RampControl.EnableHalfWaveActionAtFullPower) {
         tActualCount = TCNT0;
-        // not needed to use RampControl.MainsHalfWaveTimerCount
+        // not required to use RampControl.MainsHalfWaveTimerCount
         uint8_t tLowerCountThreshold = TIMER_COUNT_AT_ZERO_CROSSING / 2;
         // check for middle of half wave
         if (tActualCount >= tLowerCountThreshold && tActualCount < tLowerCountThreshold + (2 * ALLOWED_DELTA_PHASE_SHIFT_COUNT)) {
@@ -317,8 +316,7 @@ void setLoadDetached(void) {
      * set TRIAC control pin to input otherwise it will get low at sleep
      */
     pinModeFast(TRIACControlOutput, INPUT);
-// enable interrupts
-    sei();
+    interrupts(); // Enable interrupts
     sleep_cpu()
     ;
 
