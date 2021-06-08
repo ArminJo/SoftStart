@@ -4,7 +4,7 @@
  *
  * Generates Triac control pulses for SoftStart of series motors.
  *
- *  Copyright (C) 2018  Armin Joachimsmeyer
+ *  Copyright (C) 2018-2021  Armin Joachimsmeyer
  *  Email: armin.joachimsmeyer@gmail.com
  *
  *  This file is part of SoftStart https://github.com/ArminJo/SoftStart.
@@ -28,29 +28,32 @@
  * - STATE_RAMP -> Output TRIAC pulse and decrease pulse delay from `START_PHASE_SHIFT_DEGREES` to MINIMUM_PHASE_SHIFT_COUNT (0 degree) at every voltage zero crossing.
  * - TRIAC_CONTROL_STATE_FULL_POWER -> Output TRIAC pulse pulse at zero crossing of AC line. The multi pulse (3*350 micro seconds) will cover small delays of current zero crossing.
  *
- * Calibration mode outputs actual phase counter forever (at 115200 Baud (@1 MHZ) at pin 6 / PB1) in order to adjust the 50% duty cycle trimmer.
+ * Calibration mode outputs the timer counter value forever (at 115200 Baud (@1 MHZ) at pin 6 / PB1) in order to adjust the 50% duty cycle trimmer.
+ * Both values must be the same. Calibration mode is entered, when the ADC value from the ramp speed trimmer is less than 4.
  * Format: <counterForPositiveHalfWave>|<counterForNegativeHalfWave>\n
  *
  * INTERNALS:
- * Current voltage is biased by VCC/2 by two resistors in order to be able to measure also negative current.
+ * No delays are used except a very short (<255) delayMicroseconds() for increasing the resolution of the ramp.
+ *
+ * Current detection voltage is biased by VCC/2 by two resistors in order to be able to measure also negative current.
  * Mains triggers the interrupt pin on every edge.
  * 50 Hz gives 10 milliseconds cycle of mains and 156 * 64 microsecond clock cycles (9984 microseconds)
  * 60 Hz gives 8.33 milliseconds cycle of mains and 130 * 64 microsecond clock cycles (8320 microseconds)
  *
  * Timer0 runs in Fast PWM Mode starting at FF every 50/60 Hz half cycle and counting up. It is never stopped, only interrupts are disabled.
- * - At startup the counter is used to determine length of 50/60 Hz half cycle which compensates for internal oscillator drift.
- * - During ramp the timer is set to generate Interrupts after zero crossing, which turns on the TRIAC.
+ * - At startup, the counter is used to determine the length of 50/60 Hz half cycle which compensates for internal oscillator drift.
+ * - During ramp the timer is set to generate interrupts after zero crossing, which in turn generates the TRIAC pulse.
  * Timer1 is used for generating the width of TRIAC pulse. TRIAC is turned off after a delay implemented by CounterOverflow.
  * Timer1 also implements the breaks and the pulses for multiple TRIAC pulses by CounterOverflow.
  *
  * Zero current detection is done by ADC reading the voltage at the current shunt -> ZeroVoltageDetectionInput.
  *
- * Serial Output:
- * N1<ActualTimer0Count> - Noise -> timer at zero crossing interrupt not in expected range.
- * N2<ActualTimer0Count> - Noise during ramp -> timer at zero crossing interrupt not in expected (narrower) range.
+ * Serial Output using binary values, no ASCII conversion!:
+ * N1<Timer0CounterValue> - Noise -> timer at zero crossing interrupt not in expected range.
+ * N2<Timer0CounterValue> - Noise during ramp -> timer at zero crossing interrupt not in expected (narrower) range.
  * MP<MainsHalfWaveTimer0Count> - MainsPeriod -> measured timer count for a half wave, printed at end of synchronizing phase
- * R<NextTimerDelay><NextTRIACDelayMicros><ActualTimer0CountAtTRIACPulse> - Ramp info
- * OF<ActualTimer0Count> OverFlow -> missing (or noisy) zero crossing interrupt.
+ * R<TimerCountForTriggerDelayShift16><TimerCountAtTriggerPulse> - Ramp info
+ * OF<Timer0CounterValue> OverFlow -> missing (or noisy) zero crossing interrupt.
  */
 
 #include <Arduino.h>
@@ -104,7 +107,7 @@ void startRamp(void) {
     RampControl.MainsHalfWaveTimerCountAccumulated = 0;
     RampControl.NextOCRA = RampControl.MainsHalfWaveTimerCount - START_PHASE_SHIFT_MARGIN_COUNT;
 #ifdef INFO
-    RampControl.ActualTimerCountAtTriggerPulse = 0;
+    RampControl.TimerCountAtTriggerPulse = 0;
 #endif
 
     GIFR = (1 << INTF0) | (1 << PCIF); // reset all interrupt flags
@@ -168,7 +171,7 @@ void setRampDurationMillis(uint32_t aRampDurationMillis) {
 
 /*
  * Voltage zero crossing detection by external interrupt pin.
- * The actual delay of the TRIAC pulse for this half wave was computed in the interrupt of the half wave before!
+ * The current delay of the TRIAC pulse for this half wave was computed in the interrupt of the half wave before!
  *
  * Counter is set to FF in order to reload RampControl.NextOCRA immediately at next clock.
  * TRIAC_CONTROL_STATE_STOP -> Just count interrupts
@@ -179,9 +182,8 @@ void setRampDurationMillis(uint32_t aRampDurationMillis) {
  *               RampControl.NextOCRA is decreased every voltage zero crossing.
  * TRIAC_CONTROL_STATE_FULL_POWER -> to keep it simple just change nothing, use old values already set.
  */
-
 ISR(INT0_vect) {
-    uint8_t tActualCount = TCNT0;
+    uint8_t tTimerCounterValue = TCNT0;
 
     /*
      * reset prescaler in order to avoid jitter
@@ -217,10 +219,10 @@ ISR(INT0_vect) {
          * TEST / CALIBRATION here: output actual counter forever in order to adjust the 50% duty cycle trimmer
          */
         if (digitalReadFast(ZeroVoltageDetectionInput)) {
-            write1Start8Data1StopNoParity(tActualCount);
+            write1Start8Data1StopNoParity(tTimerCounterValue);
             write1Start8Data1StopNoParity('|');
         } else {
-            write1Start8Data1StopNoParity(tActualCount);
+            write1Start8Data1StopNoParity(tTimerCounterValue);
             write1Start8Data1StopNoParity('\n');
         }
         return;
@@ -229,12 +231,12 @@ ISR(INT0_vect) {
     /*
      * Detect noise -> just return
      */
-    if (tActualCount < (RampControl.MainsHalfWaveTimerCount - ALLOWED_DELTA_PHASE_SHIFT_COUNT)
-            || tActualCount > (RampControl.MainsHalfWaveTimerCount + ALLOWED_DELTA_PHASE_SHIFT_COUNT)) {
+    if (tTimerCounterValue < (RampControl.MainsHalfWaveTimerCount - ALLOWED_DELTA_PHASE_SHIFT_COUNT)
+            || tTimerCounterValue > (RampControl.MainsHalfWaveTimerCount + ALLOWED_DELTA_PHASE_SHIFT_COUNT)) {
 #ifdef ERROR
         write1Start8Data1StopNoParity('N');
         write1Start8Data1StopNoParity('1');
-        write1Start8Data1StopNoParity(tActualCount);
+        write1Start8Data1StopNoParity(tTimerCounterValue);
         write1Start8Data1StopNoParity('\n');
 #endif
         return;
@@ -246,17 +248,17 @@ ISR(INT0_vect) {
          *******************************************************************/
         if (RampControl.HalfWaveCounterIntern == 0) {
             /*
-             * First cycle. tActualCount may be invalid so just increment counter - see below
+             * First cycle. tTimerCounterValue may be invalid so just increment counter - see below
              */
 
         } else if (RampControl.HalfWaveCounterIntern <= SYNCHRONIZING_CYCLES) {
             /*
              * sum count for one mains phase
              */
-            RampControl.MainsHalfWaveTimerCountAccumulated += tActualCount;
+            RampControl.MainsHalfWaveTimerCountAccumulated += tTimerCounterValue;
 #ifdef DEBUG
             write1Start8Data1StopNoParity('A');
-            write1Start8Data1StopNoParity(tActualCount);
+            write1Start8Data1StopNoParity(tTimerCounterValue);
 #endif
         } else {
             /*
@@ -290,16 +292,16 @@ ISR(INT0_vect) {
          * Use narrower plausibility values here for the (10 millis) mains cycle. If not met, just do nothing and wait for next transition,
          * main loop will handle counter overflow.
          */
-        if (tActualCount < (RampControl.MainsHalfWaveTimerCount - (ALLOWED_DELTA_PHASE_SHIFT_COUNT / 2))
-                || tActualCount > (RampControl.MainsHalfWaveTimerCount + (ALLOWED_DELTA_PHASE_SHIFT_COUNT / 2))) {
+        if (tTimerCounterValue < (RampControl.MainsHalfWaveTimerCount - (ALLOWED_DELTA_PHASE_SHIFT_COUNT / 2))
+                || tTimerCounterValue > (RampControl.MainsHalfWaveTimerCount + (ALLOWED_DELTA_PHASE_SHIFT_COUNT / 2))) {
             /*
-             * Noise here. Actual count not in the expected range
+             * Noise here. tTimerCounterValue not in the expected range
              * Printing of noise may lead to delaying the next interrupt and therefore missing the right count value
              */
 #ifdef ERROR
             write1Start8Data1StopNoParity('N');
             write1Start8Data1StopNoParity('2');
-            write1Start8Data1StopNoParity(tActualCount);
+            write1Start8Data1StopNoParity(tTimerCounterValue);
             write1Start8Data1StopNoParity('\n');
 #endif
         } else {
@@ -370,7 +372,7 @@ void StartTriacPulse(void) {
 // set TRIAC pin to active
     digitalWriteFast(TRIACControlOutput, 0);
 #ifdef INFO
-    RampControl.ActualTimerCountAtTriggerPulse = TCNT0;
+    RampControl.TimerCountAtTriggerPulse = TCNT0;
 #endif
     RampControl.TRIACPulseCount = 1;
 
@@ -431,10 +433,10 @@ void printRampInfo() {
 #ifdef INFO
     if (RampControl.DoWriteRampData) {
         write1Start8Data1StopNoParityWithCliSei('R');
-        // output actual trigger delay
+        // output current trigger delay
         write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountForTriggerDelayShift16.byte.MidHighByte);
         write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountForTriggerDelayShift16.byte.MidLowByte);
-        write1Start8Data1StopNoParityWithCliSei(RampControl.ActualTimerCountAtTriggerPulse);
+        write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountAtTriggerPulse);
         write1Start8Data1StopNoParityWithCliSei('\n');
         RampControl.DoWriteRampData = false;
     }
@@ -446,17 +448,17 @@ void checkAndHandleCounterOverflowForLoop() {
         /*
          * Check for counter overflow if load attached, but not in test/calibration mode
          */
-        uint8_t tActualTimerCount = TCNT0;
-        if (tActualTimerCount
+        uint8_t tTimerCounterValue = TCNT0;
+        if (tTimerCounterValue
                 >= RampControl.MainsHalfWaveTimerCount
-                        + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2)&& tActualTimerCount < TIMER_VALUE_FOR_FULL_POWER) {
+                        + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2)&& tTimerCounterValue < TIMER_VALUE_FOR_FULL_POWER) {
             // assume missing trigger -> setup counter for next period
-            TCNT0 = tActualTimerCount - RampControl.MainsHalfWaveTimerCount;
+            TCNT0 = tTimerCounterValue - RampControl.MainsHalfWaveTimerCount;
 #ifdef ERROR
             if (RampControl.SoftStartState != TRIAC_CONTROL_STATE_STOP) {
                 write1Start8Data1StopNoParityWithCliSei('O');
                 write1Start8Data1StopNoParityWithCliSei('F');
-                write1Start8Data1StopNoParityWithCliSei(tActualTimerCount);
+                write1Start8Data1StopNoParityWithCliSei(tTimerCounterValue);
                 write1Start8Data1StopNoParityWithCliSei('\n');
             }
 #endif

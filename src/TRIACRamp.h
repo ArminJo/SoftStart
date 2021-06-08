@@ -20,7 +20,7 @@
 //#define ERROR   // print error output - count overflow/missing zero crossing trigger
 #include "DebugLevel.h"  // Propagate debug level
 
-// if used for 60 Hz instead of 50 Hz mains comment out the next line
+// if used for 60 Hz instead of 50 Hz mains activate the next line
 //#define MAINS_HAVE_60_HZ
 
 //
@@ -44,8 +44,7 @@
 #if defined(TX_PIN) && defined(LED_PIN) && (LED_PIN != TX_PIN)
 #error LED pin must be equal TX pin.
 #endif
-// comment out if no led for indicating ramp is used
-// #define RAMP_INDICATOR_LED LED_PIN
+// #define RAMP_INDICATOR_LED LED_PIN // activate it, if no led for indicating ramp is used
 
 /*
  * Timer definitions
@@ -94,8 +93,8 @@
 /*
  * Trigger impulse timing
  */
-#define TIMER1_CLOCK_DIVIDER TIMER1_CLOCK_DIVIDER_FOR_8_MICROS // gives max 2 ms trigger pulse
-#define TRIAC_PULSE_TIMER_CLOCK_CYCLE_MICROS 8
+#define TIMER1_CLOCK_DIVIDER                    TIMER1_CLOCK_DIVIDER_FOR_8_MICROS // gives max 2 ms trigger pulse
+#define TRIAC_PULSE_TIMER_CLOCK_CYCLE_MICROS    8
 
 /*
  *  Length of trigger pulse - 100 us is too small for my circuit
@@ -109,7 +108,7 @@
 #define TRIAC_PULSE_NUMBERS 3
 
 /*
- *  Length of break between multiple trigger pulses
+ * Length of break between (multiple) trigger pulses
  */
 #define TRIAC_PULSE_BREAK_MICROS 400
 
@@ -134,12 +133,12 @@
  * Test mode to adjust external trimmer to 50% duty cycle
  */
 #define TEST_MODE_MAX_ADC_VALUE 4
-extern bool isTestMode;  // output actual counter forever in order to adjust the 50% duty cycle trimmer
+extern bool isTestMode;  // output timer counter value forever in order to adjust the 50% duty cycle trimmer
 
 /*
  * Sometimes it helps the compiler if you use this union
  */
-union Mylong {
+union LongUnion {
     struct {
         uint8_t LowByte;
         uint8_t MidLowByte;
@@ -150,6 +149,7 @@ union Mylong {
         uint16_t LowWord;
         uint16_t HighWord;
     } word;
+    uint8_t bytes[4];
     uint32_t ULong;
     int32_t Long;
 };
@@ -158,7 +158,7 @@ union Mylong {
  * States of the state machine
  */
 #define TRIAC_CONTROL_STATE_STOP 0
-#define TRIAC_CONTROL_STATE_OUTPUT_COUNTER 1 // output actual counter forever in order to adjust the 50% duty cycle trimmer
+#define TRIAC_CONTROL_STATE_OUTPUT_COUNTER 1 // output timer counter value forever in order to adjust the 50% duty cycle trimmer
 #define TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING 2
 #define TRIAC_CONTROL_STATE_RAMP_UP 3
 #define TRIAC_CONTROL_STATE_RAMP_DOWN 4 // for future use
@@ -166,7 +166,11 @@ union Mylong {
 
 struct RampControlStruct {
     volatile uint8_t SoftStartState;
-    bool CalibrationModeActive; // output actual counter forever in order to adjust the 50% duty cycle trimmer for the mains 50/60 Hz trigger generation
+    /*
+     * Calibration mode is entered, when the ADC value from the ramp speed trimmer is less than 4.
+     * Output timer counter value forever in order to adjust the 50% duty cycle trimmer for the mains 50/60 Hz trigger generation.
+     */
+    bool CalibrationModeActive;
 
     /*
      * Timer
@@ -180,7 +184,7 @@ struct RampControlStruct {
 
     uint8_t TRIACPulseCount; //counts multiple TRIAC pulses
 #ifdef INFO
-    volatile uint8_t ActualTimerCountAtTriggerPulse;
+    volatile uint8_t TimerCountAtTriggerPulse;
 #endif
     /*
      * Ramp computation
@@ -189,7 +193,7 @@ struct RampControlStruct {
      * The MidLowByte is used for microseconds delay.
      * The LowByte is used to increase the resolution to enable long ramps.
      */
-    Mylong TimerCountForTriggerDelayShift16; // only used for RAMP
+    LongUnion TimerCountForTriggerDelayShift16; // only used for RAMP
     uint32_t DelayDecrement; // amount of delay to be subtracted from RampControl.TimerCountForTriggerDelayShift16 each half wave.
 
     /*

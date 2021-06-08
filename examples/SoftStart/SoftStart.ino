@@ -66,7 +66,7 @@
 #ifdef LOAD_ON_OFF_DETECTION
 #ifdef INFO
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__)
-#error Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (comment out) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45.
+#error Code size of this example is too large to fit in an ATtiny 25 or 45. Undefine (deactivate) LOAD_ON_OFF_DETECTION or change #define INFO in TRIACRamp.h to #define ERROR to shrink the code for an ATtiny45.
 #endif
 #endif
 /*
@@ -113,7 +113,7 @@ struct ControlStruct {
 
 } SoftStartControl;
 
-#define ALLOWED_DELTA_ZERO_CURRENT 6
+#define ALLOWED_DELTA_ZERO_CURRENT_LSB 6
 
 #define PERIODS_THRESHOLD_FOR_LOAD_DETACHED 50 // periods without a load until off
 void setLoadDetached(void);
@@ -167,7 +167,7 @@ void setup(void) {
 #endif
 
     if (RampControl.CalibrationModeActive) {
-        startRamp();
+        startRamp(); // this force calibration output
     } else {
         sleep_enable()
         ;
@@ -199,17 +199,17 @@ void setup(void) {
 void loop(void) {
 
 #ifdef LOAD_ON_OFF_DETECTION
-    uint8_t tActualCount = TCNT0;
+    uint8_t tCurrentCount = TCNT0;
     /*
      * Take 1 sample at middle of current period to determine if load is still attached
      */
     if (SoftStartControl.isLoadAttached && RampControl.SoftStartState == TRIAC_CONTROL_STATE_FULL_POWER
             && RampControl.EnableHalfWaveActionAtFullPower) {
-        tActualCount = TCNT0;
+        tCurrentCount = TCNT0;
         // not required to use RampControl.MainsHalfWaveTimerCount
         uint8_t tLowerCountThreshold = TIMER_COUNT_AT_ZERO_CROSSING / 2;
         // check for middle of half wave
-        if (tActualCount >= tLowerCountThreshold && tActualCount < tLowerCountThreshold + (2 * ALLOWED_DELTA_PHASE_SHIFT_COUNT)) {
+        if (tCurrentCount >= tLowerCountThreshold && tCurrentCount < tLowerCountThreshold + (2 * ALLOWED_DELTA_PHASE_SHIFT_COUNT)) {
             // Do it only once per mains period
             checkForLoadAttached();
         }
@@ -347,7 +347,7 @@ void checkForLoadAttached(void) {
              */
             SoftStartControl.ZeroCurrentADCReferenceValue--;
             tZeroCurrentDetected = true;
-        } else if (tActualCurrentADCValue < (tZeroCurrentADCReferenceValue + ALLOWED_DELTA_ZERO_CURRENT)) {
+        } else if (tActualCurrentADCValue < (tZeroCurrentADCReferenceValue + ALLOWED_DELTA_ZERO_CURRENT_LSB)) {
             tZeroCurrentDetected = true;
         }
     } else {
@@ -358,7 +358,7 @@ void checkForLoadAttached(void) {
              */
             SoftStartControl.ZeroCurrentADCReferenceValue++;
             tZeroCurrentDetected = true;
-        } else if (tActualCurrentADCValue > (tZeroCurrentADCReferenceValue - ALLOWED_DELTA_ZERO_CURRENT)) {
+        } else if (tActualCurrentADCValue > (tZeroCurrentADCReferenceValue - ALLOWED_DELTA_ZERO_CURRENT_LSB)) {
             tZeroCurrentDetected = true;
         }
     }
@@ -383,6 +383,7 @@ void checkForLoadAttached(void) {
 
 /*
  * get interrupt if load attached
+ * TODO detect load attached by monitoring current sense -> freeing pin for serial
  */
 ISR(PCINT0_vect) {
     setLoadAttached();
