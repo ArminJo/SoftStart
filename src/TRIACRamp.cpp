@@ -30,7 +30,7 @@
  *
  * Calibration mode outputs the timer counter value forever (at 115200 Baud (@1 MHZ) at pin 6 / PB1) in order to adjust the 50% duty cycle trimmer.
  * Both values must be the same. Calibration mode is entered, when the ADC value from the ramp speed trimmer is less than 4.
- * Format: <counterForPositiveHalfWave>|<counterForNegativeHalfWave>\n
+ * Format: C<counterForPositiveHalfWave><counterForNegativeHalfWave>\n
  *
  * INTERNALS:
  * No delays are used except a very short (<255) delayMicroseconds() for increasing the resolution of the ramp.
@@ -40,25 +40,26 @@
  * 50 Hz gives 10 milliseconds cycle of mains and 156 * 64 microsecond clock cycles (9984 microseconds)
  * 60 Hz gives 8.33 milliseconds cycle of mains and 130 * 64 microsecond clock cycles (8320 microseconds)
  *
- * Timer0 runs in Fast PWM Mode starting at FF every 50/60 Hz half cycle and counting up. It is never stopped, only interrupts are disabled.
- * - At startup, the counter is used to determine the length of 50/60 Hz half cycle which compensates for internal oscillator drift.
- * - During ramp the timer is set to generate interrupts after zero crossing, which in turn generates the TRIAC pulse.
+ * Timer0 runs in Fast PWM Mode starting at FF every 50/60 Hz zero crossing and counting up.
+ * It is never stopped, only interrupts are disabled.
+ * - At startup, the counter is used to determine the length of 50/60 Hz half cycle to compensate for internal oscillator drift.
+ * - During ramp, the timer is set to generate interrupts after zero crossing, which in turn generates the TRIAC pulse.
  * Timer1 is used for generating the width of TRIAC pulse. TRIAC is turned off after a delay implemented by CounterOverflow.
  * Timer1 also implements the breaks and the pulses for multiple TRIAC pulses by CounterOverflow.
  *
- * Zero current detection is done by ADC reading the voltage at the current shunt -> ZeroVoltageDetectionInput.
  *
- * Serial Output using binary values, no ASCII conversion!:
+ * Serial output uses binary values, no ASCII conversion is made! LF or \n is the newline character.
+ *
+ * C<counterForPositiveHalfWave><counterForNegativeHalfWave> - Calibration output if the ramp speed trimmer is less than 4.
  * N1<Timer0CounterValue> - Noise -> timer at zero crossing interrupt not in expected range.
  * N2<Timer0CounterValue> - Noise during ramp -> timer at zero crossing interrupt not in expected (narrower) range.
  * MP<MainsHalfWaveTimer0Count> - MainsPeriod -> measured timer count for a half wave, printed at end of synchronizing phase
- * R<TimerCountForTriggerDelayShift16><TimerCountAtTriggerPulse> - Ramp info
+ * R<TimerCountForTriggerDelayShift16 HighByte><TimerCountForTriggerDelayShift16 LowByte><TimerCountAtTriggerPulse> - Ramp info
  * OF<Timer0CounterValue> OverFlow -> missing (or noisy) zero crossing interrupt.
  */
 
 #include <Arduino.h>
 #include "TRIACRamp.h"
-#include "ATtinyUtils.h"
 
 #include <avr/io.h>
 #include "digitalWriteFast.h"
@@ -66,19 +67,20 @@
 #include "ATtinySerialOut.h"
 
 void initRampControl() {
-    // Pin is active LOW, so set them to HIGH initially
+    // Pin is active LOW, so set it to HIGH initially
     digitalWriteFast(TRIACControlOutput, HIGH);
     pinModeFast(TRIACControlOutput, OUTPUT);
 
     // Enable zero crossing interrupt at PB2
-    GIMSK = (1 << INT0); // Enable INT0 (50/60 HZ input) + disable PinChange interrupt
+    GIMSK = (1 << INT0); // Enable INT0 (50/60 HZ input)
     MCUCR = (1 << ISC00); // interrupt on any edge for INT0 to get 100/120 Hz interrupts
 
     /*
-     * Setup Timer0 for ramp delay and measurement of mains period.
-     * This timer runs forever
+     * Setup Timer0 for ramp delay after zero crossing and measurement of mains period.
+     * This timer runs forever, counts up from 0 to 0xFF and generates interrupt at OCRA
+     * OCRA is updated at every zero crossing interrupt
      */
-// Fast PWM mode
+// Fast PWM mode: timer counts up from 0 to 0xFF and generates interrupt at OCRA
     TCCR0A = TIMER0_FAST_PWM;
 #if (F_CPU == 1000000)
     //Start Timer 0 1MHz/64 -> 64 us clock -> gives 156 counts for 10 ms
@@ -89,11 +91,14 @@ void initRampControl() {
     TCCR0B = TIMER0_CLOCK_DIVIDER_FOR_128_MICROS;
 #endif
     TCNT0 = 0;
+    OCR0A = OCRA_VALUE_FOR_NO_POWER;
 
     RampControl.NextOCRA = OCRA_VALUE_FOR_NO_POWER; // to avoid triggering the TRIAC - 0xFF means full power mode with no minimal phase count and should not be used here
     RampControl.SoftStartState = TRIAC_CONTROL_STATE_STOP;
     RampControl.DoWriteRampData = false;
+#ifdef INFO
     RampControl.CalibrationModeActive = false;
+#endif
     // TODO use EEPROM for this value
     RampControl.MainsHalfWaveTimerCount = TIMER_COUNT_AT_ZERO_CROSSING; // initialize value
 }
@@ -146,26 +151,23 @@ void switchToFullPower() {
 #pragma GCC diagnostic pop
 }
 
-void setCalibrationMode() {
-    RampControl.CalibrationModeActive = true;
-}
 
 void setRampDurationSeconds(uint16_t aRampDurationSeconds) {
-    uint32_t tValue = ((uint32_t)TIMER_COUNT_AT_ZERO_CROSSING << 16) / HALF_WAVES_PER_SECOND; // 0x00018CCC
+    uint32_t tValue = ((uint32_t) TIMER_COUNT_AT_ZERO_CROSSING << 16) / HALF_WAVES_PER_SECOND; // 0x00018CCC
     if (aRampDurationSeconds == 0) {
-        RampControl.DelayDecrement = tValue * 4; // Quarter of a second
+        RampControl.DelayDecrementPerHalfWaveShift16 = tValue * 4; // Quarter of a second, 12.5 full mains periods to full power
     } else {
-        RampControl.DelayDecrement = tValue / aRampDurationSeconds;
+        RampControl.DelayDecrementPerHalfWaveShift16 = tValue / aRampDurationSeconds;
     }
 }
 
 void setRampDurationMillis(uint32_t aRampDurationMillis) {
-    // instead of *1000 use *100 and /10 in divisor to avoid 32 bit overflow
-    uint32_t tValue = (((uint32_t)TIMER_COUNT_AT_ZERO_CROSSING << 16) * 100) / (HALF_WAVES_PER_SECOND / 10); // 0x060E0000
     if (aRampDurationMillis == 0) {
-        RampControl.DelayDecrement = ((uint32_t)TIMER_COUNT_AT_ZERO_CROSSING << 16) / 4; // 4 mains periods to full power
+        RampControl.DelayDecrementPerHalfWaveShift16 = ((uint32_t) TIMER_COUNT_AT_ZERO_CROSSING << 16) / 4; // 2 full mains periods to full power
     } else {
-        RampControl.DelayDecrement = tValue / aRampDurationMillis;
+        // 0x060E0000 / aRampDurationMillis - instead of *1000 use *100 and /10 in divisor to avoid 32 bit overflow
+        RampControl.DelayDecrementPerHalfWaveShift16 = (((uint32_t) TIMER_COUNT_AT_ZERO_CROSSING << 16) * 100)
+                / (HALF_WAVES_PER_SECOND / 10) / aRampDurationMillis;
     }
 }
 
@@ -203,7 +205,7 @@ ISR(INT0_vect) {
         // so there is a step in delay from last ramp delay to full power of (measured) 160 microseconds
         StartTriacPulse();
         RampControl.HalfWaveCounterForExternalTiming++;
-        RampControl.EnableHalfWaveActionAtFullPower = true;
+        RampControl.HalfWaveAtFullPowerJustStarted = true;
         return;
     }
     RampControl.HalfWaveCounterForExternalTiming++;
@@ -213,20 +215,23 @@ ISR(INT0_vect) {
         return;
     }
 
+#ifdef INFO
     if (RampControl.CalibrationModeActive) {
 
         /*
          * TEST / CALIBRATION here: output actual counter forever in order to adjust the 50% duty cycle trimmer
          */
         if (digitalReadFast(ZeroVoltageDetectionInput)) {
+            // "First" half wave
+            write1Start8Data1StopNoParity('C');
             write1Start8Data1StopNoParity(tTimerCounterValue);
-            write1Start8Data1StopNoParity('|');
         } else {
             write1Start8Data1StopNoParity(tTimerCounterValue);
             write1Start8Data1StopNoParity('\n');
         }
         return;
     }
+#endif
 
     /*
      * Detect noise -> just return
@@ -315,8 +320,8 @@ ISR(INT0_vect) {
                  *
                  */
                 RampControl.MicrosecondsDelayForTriggerPulse = RampControl.NextMicrosecondsDelayForTriggerPulse;
-                if (RampControl.TimerCountForTriggerDelayShift16.ULong >= RampControl.DelayDecrement) {
-                    RampControl.TimerCountForTriggerDelayShift16.ULong -= RampControl.DelayDecrement;
+                if (RampControl.TimerCountForTriggerDelayShift16.ULong >= RampControl.DelayDecrementPerHalfWaveShift16) {
+                    RampControl.TimerCountForTriggerDelayShift16.ULong -= RampControl.DelayDecrementPerHalfWaveShift16;
                 } else {
                     // underflow here
                     RampControl.TimerCountForTriggerDelayShift16.ULong = 0;
@@ -426,11 +431,15 @@ ISR(TIMER1_OVF_vect) {
     }
 }
 
+#ifdef INFO
+void setCalibrationMode() {
+    RampControl.CalibrationModeActive = true;
+}
+
 /*
  * Write output for STATE_RAMP here in order to keep the timing of ISR
  */
 void printRampInfo() {
-#ifdef INFO
     if (RampControl.DoWriteRampData) {
         write1Start8Data1StopNoParityWithCliSei('R');
         // output current trigger delay
@@ -440,18 +449,19 @@ void printRampInfo() {
         write1Start8Data1StopNoParityWithCliSei('\n');
         RampControl.DoWriteRampData = false;
     }
-#endif
 }
+#endif
 
 void checkAndHandleCounterOverflowForLoop() {
+#ifdef INFO
     if (!RampControl.CalibrationModeActive) {
+#endif
         /*
          * Check for counter overflow if load attached, but not in test/calibration mode
          */
         uint8_t tTimerCounterValue = TCNT0;
         if (tTimerCounterValue
-                >= RampControl.MainsHalfWaveTimerCount
-                        + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2)&& tTimerCounterValue < TIMER_VALUE_FOR_FULL_POWER) {
+                >= (RampControl.MainsHalfWaveTimerCount + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2))&& tTimerCounterValue < TIMER_VALUE_FOR_FULL_POWER) {
             // assume missing trigger -> setup counter for next period
             TCNT0 = tTimerCounterValue - RampControl.MainsHalfWaveTimerCount;
 #ifdef ERROR
@@ -462,6 +472,8 @@ void checkAndHandleCounterOverflowForLoop() {
                 write1Start8Data1StopNoParityWithCliSei('\n');
             }
 #endif
+#ifdef INFO
         }
+#endif
     }
 }

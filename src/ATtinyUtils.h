@@ -89,7 +89,7 @@
  * Formula is only valid for constant values
  * Loading of constant value adds 2 extra cycles (check .lss file for exact timing)
  *
- * Only multiple of 4 cycles are possible. Last loop is only 3 cycles.
+ * The loop takes 4 cycles (4 microseconds  at 1 MHz). Last loop is only 3 cycles.
  * 1 -> 3(+2) cycles
  * 2 -> 7(+2) cycles
  * 3 -> 11(+2) cycles

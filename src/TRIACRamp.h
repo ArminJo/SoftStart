@@ -13,10 +13,11 @@
 #ifndef TRIACRAMP_H_
 #define TRIACRAMP_H_
 
+#include "ATtinyUtils.h" // for TIMER1_CLOCK_DIVIDER_FOR_8_MICROS etc.
 #include <stdint.h>
 
 //#define DEBUG // for debug output
-#define INFO  // for info output - delay, load detaching values
+#define INFO  // enabled by default. Enables calibration mode. for info output - delay, load detaching values
 //#define ERROR   // print error output - count overflow/missing zero crossing trigger
 #include "DebugLevel.h"  // Propagate debug level
 
@@ -28,8 +29,8 @@
 //
 //                                        +-\/-+
 //                  RESET ADC0 (D5) PB5  1|    |8  Vcc
-//      PCINT3/CLKI/!OC1B/ADC3 (D3) PB3  2|    |7  PB2 (D2) INT0 - Zero Voltage Crossing Sense
-// (Zero) Current Sense - ADC2 (D4) PB4  3|    |6  PB1 (D1) MISO/DO/AIN1/OC0B/OC1A/PCINT1 - TX Debug output / LED out / Load on/off detect
+// USB+   Ramp Duration - ADC3 (D3) PB3  2|    |7  PB2 (D2) INT0/ADC1 - Zero voltage Crossing Sense
+// USB-   Current Sense - ADC2 (D4) PB4  3|    |6  PB1 (D1) MISO/DO/AIN1/OC0B/OC1A/PCINT1 - TX Debug output - (Digispark) LED
 //                                  GND  4|    |5  PB0 (D0) OC0A - TRIAC Control
 //                                        +----+
 //
@@ -52,8 +53,8 @@
 #define TIMER0_COUNTER_TOP 0xFF
 #define TIMER0_FAST_PWM ((1 << WGM01) | (1 << WGM00))
 
-#define TIMER_VALUE_FOR_FULL_POWER TIMER0_COUNTER_TOP
-#define OCRA_VALUE_FOR_NO_POWER 0xFE
+#define TIMER_VALUE_FOR_FULL_POWER TIMER0_COUNTER_TOP // this value must be > TIMER_COUNT_AT_ZERO_CROSSING
+#define OCRA_VALUE_FOR_NO_POWER 0xFE // this value must be != TIMER_VALUE_FOR_FULL_POWER and > TIMER_COUNT_AT_ZERO_CROSSING
 
 #if (F_CPU != 1000000) &&  (F_CPU != 8000000)
 #error F_CPU value must be 1000000 or 8000000.
@@ -68,18 +69,19 @@
 #endif
 
 #ifdef MAINS_HAVE_60_HZ
-// 0x82. 130 * 64 us gives 8320 microseconds
-#define TOTAL_PHASE_SHIFT_COUNT (8333 / TIMER0_CLOCK_CYCLE_MICROS)
 #define HALF_WAVES_PER_SECOND 120
 #else
-// 0x9C. 156 * 64 us gives 9984 microseconds
-// 0x4E. 78 * 128 us gives 9984 microseconds
-#define TOTAL_PHASE_SHIFT_COUNT (10000 / TIMER0_CLOCK_CYCLE_MICROS)
 #define HALF_WAVES_PER_SECOND 100
-#define DELAY_DECREMENT_FOR_A_ONE_SECOND_RAMP
 #endif
 
-#define TIMER_COUNT_AT_ZERO_CROSSING (TOTAL_PHASE_SHIFT_COUNT - 1) // 155 for 50 Hz. -1 since timer starts with 0xFF
+#define MICROSECONDS_PER_HALF_WAVE (1000000L / HALF_WAVES_PER_SECOND)
+// TOTAL_HALF_WAVE_TIMER_COUNT values are:
+// 0x82. 130 * 64 us gives 8320 microseconds for 60 Hz
+// 0x9C. 156 * 64 us gives 9984 microseconds for 50 Hz
+// 0x4E. 78 * 128 us gives 9984 microseconds for 50 Hz
+#define TOTAL_HALF_WAVE_TIMER_COUNT (MICROSECONDS_PER_HALF_WAVE / TIMER0_CLOCK_CYCLE_MICROS)
+
+#define TIMER_COUNT_AT_ZERO_CROSSING (TOTAL_HALF_WAVE_TIMER_COUNT - 1) // 155 for 50 Hz. -1 since we start timer with 0xFF
 
 // for plausibility check of voltage zero crossing detection. 6 => ~2 Hz/380 usec
 #define ALLOWED_DELTA_PHASE_SHIFT_COUNT 6
@@ -116,7 +118,7 @@
 // Values from 0 - 180 degrees, but the extremes make no sense
 #define START_PHASE_SHIFT_DEGREES 160
 
-#define START_PHASE_SHIFT_MARGIN_COUNT ((TOTAL_PHASE_SHIFT_COUNT * (180 - START_PHASE_SHIFT_DEGREES)) / 180)
+#define START_PHASE_SHIFT_MARGIN_COUNT ((TOTAL_HALF_WAVE_TIMER_COUNT * (180 - START_PHASE_SHIFT_DEGREES)) / 180)
 #if (START_PHASE_SHIFT_DEGREES < 45)
 #error START_PHASE_SHIFT_DEGREES below 45 degree makes no sense.
 #endif
@@ -166,11 +168,13 @@ union LongUnion {
 
 struct RampControlStruct {
     volatile uint8_t SoftStartState;
+#ifdef INFO
     /*
      * Calibration mode is entered, when the ADC value from the ramp speed trimmer is less than 4.
      * Output timer counter value forever in order to adjust the 50% duty cycle trimmer for the mains 50/60 Hz trigger generation.
      */
     bool CalibrationModeActive;
+#endif
 
     /*
      * Timer
@@ -194,7 +198,7 @@ struct RampControlStruct {
      * The LowByte is used to increase the resolution to enable long ramps.
      */
     LongUnion TimerCountForTriggerDelayShift16; // only used for RAMP
-    uint32_t DelayDecrement; // amount of delay to be subtracted from RampControl.TimerCountForTriggerDelayShift16 each half wave.
+    uint32_t DelayDecrementPerHalfWaveShift16; // amount of delay to be subtracted from RampControl.TimerCountForTriggerDelayShift16 each half wave.
 
     /*
      * The measured count of Timer0 at zero crossing of one half wave.
@@ -209,7 +213,7 @@ struct RampControlStruct {
      */
     volatile uint16_t HalfWaveCounterForExternalTiming;
     // Signal to loop() that interrupt has occurred and new half wave begins
-    volatile bool EnableHalfWaveActionAtFullPower;
+    volatile bool HalfWaveAtFullPowerJustStarted;
     // Signal to loop() to write data
     volatile bool DoWriteRampData;
 };
