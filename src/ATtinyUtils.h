@@ -13,11 +13,11 @@
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *  See the GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with this program.  If not, see <http://www.gnu.org/licenses/gpl.html>.
+ *  along with this program. If not, see <http://www.gnu.org/licenses/gpl.html>.
  *
  */
 
@@ -30,6 +30,9 @@
 // USB-   PCINT4/XTAL2/CLKO/ OC1B/ADC2 (4) PB4  3|    |6  PB1 (1) MISO/DO/AIN1/OC0B/ OC1A/PCINT1 - (Digispark) LED
 //                                         GND  4|    |5  PB0 (0) MOSI/DI/AIN0/OC0A/!OC1A/SDA/AREF/PCINT0
 //                                               +----+
+//
+// On Digispark boards, PB5/USB- and PB3/USB+ are clamped by a 68 (USB A version) or 22 ohm (micro USB version) series resistor connected to a 3.7 V Zener to ground.
+// PB3/USB+ has a 1.0k (USB A version) or 1.5k (micro USB version) pullup to VCCC.
 
 // ATMEL ATTINY167
 // Pin numbers are for Digispark core
@@ -39,26 +42,27 @@
 //    RX  6 (0) PA0  1|    |20  PB0 (D8)  0 OC1AU  TONE  Timer 1 Channel A
 //    TX  7 (1) PA1  2|    |19  PB1 (9)  1 OC1BU  Internal LED
 //        8 (2) PA2  3|    |18  PB2 (10) 2 OC1AV  Timer 1 Channel B
-//   INT1 9 (3) PA3  4|    |17  PB3 (11) 4 OC1BV  connected with 51 Ohm to D- and 3.3 volt Zener.
+//   INT1 9 (3) PA3  4|    |17  PB3 (11) 4 OC1BV  connected with 51 ohm to D- and 3.3 volt zener diode.
 //             AVCC  5|    |16  GND
 //             AGND  6|    |15  VCC
 //       10 (4) PA4  7|    |14  PB4 (12) XTAL1
 //       11 (5) PA5  8|    |13  PB5 (13) XTAL2
-//       12 (6) PA6  9|    |12  PB6 (14) 3 INT0  connected with 68 Ohm to D+ (and disconnected 3.3 volt Zener). Is terminated with ~20 kOhm if USB attached :-(
+//       12 (6) PA6  9|    |12  PB6 (14) 3 INT0  connected with 68 ohm to D+ (and disconnected 3.3 volt zener diode). Is terminated with ~20 kOhm if USB attached :-(
 //        5 (7) PA7 10|    |11  PB7 (15) RESET
 //                    +----+
 //
 
-#ifndef ATTINYUTILS_H_
-#define ATTINYUTILS_H_
+#ifndef _ATTINY_UTILS_H
+#define _ATTINY_UTILS_H
+
+#include <Arduino.h>
 
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__) || defined(__AVR_ATtiny87__) || defined(__AVR_ATtiny167__)
 
-#include <Arduino.h>
 #include <avr/io.h>
 
 #if defined(ARDUINO_AVR_DIGISPARK)
-#  ifndef LED_BUILTIN
+#  if !defined(LED_BUILTIN)
 #define LED_BUILTIN PB1
 #  endif
 
@@ -106,6 +110,7 @@ inline void delay4CyclesInlineExact(uint16_t a4Microseconds) {
 }
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
 void toneWithTimer1PWM(uint16_t aFrequency, bool aUseOutputB = false);
+void noToneWithTimer1PWM();
 #endif
 
 uint8_t getBODLevelFuses();
@@ -114,6 +119,4 @@ bool isBODSFlagExistent();
 void changeDigisparkClock();
 
 #endif //  defined(__AVR_ATtiny85__)
-#endif /* ATTINYUTILS_H_ */
-
-#pragma once
+#endif // _ATTINY_UTILS_H

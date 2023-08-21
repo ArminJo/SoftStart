@@ -1,5 +1,5 @@
 /*
- * ATtinySerialOut.cpp
+ * ATtinySerialOut.hpp
  *
  * For transmitting debug data over bit bang serial with 115200 baud for 1/8/16 MHz ATtiny clock.
  * For 1 MHz you can choose also 38400 baud (120 bytes smaller code size).
@@ -7,12 +7,13 @@
  * 1 Start, 8 Data, 1 Stop, No Parity
  *
  * Using PB2 // (Pin7 on Tiny85) as default TX pin to be compatible with digispark board
- * To change the output pin, modify the line "#define TX_PIN ..." in TinySerialOut.h or or set it as compiler symbol like "-DTX_PIN PB1".
+ * To change the output pin, add a line "#define TX_PIN ..." before the line #include "TinySerialOut.hpp"
+ * or or set it as compiler symbol like "-DTX_PIN PIN_PB1".
  *
  * Using the Serial.print commands needs 4 bytes extra for each call.
  *
  *
- *  Copyright (C) 2015-2020  Armin Joachimsmeyer
+ *  Copyright (C) 2015-2023  Armin Joachimsmeyer
  *  Email: armin.joachimsmeyer@gmail.com
  *
  *  This file is part of TinySerialOut https://github.com/ArminJo/ATtinySerialOut.
@@ -24,13 +25,16 @@
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *  See the GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with this program.  If not, see <http://www.gnu.org/licenses/gpl.html>.
+ *  along with this program. If not, see <http://www.gnu.org/licenses/gpl.html>.
  *
  */
+
+#ifndef _ATTINY_SERIAL_OUT_HPP
+#define _ATTINY_SERIAL_OUT_HPP
 
 #if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__) \
     || defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__) \
@@ -43,43 +47,81 @@
 #define _NOP()  __asm__ volatile ("nop")
 #endif
 
-#ifndef PORTB
+#if !defined(PORTB)
 #define PORTB (*(volatile uint8_t *)((0x18) + 0x20))
 #endif
 
-#if defined(__AVR_ATtiny87__) || defined(__AVR_ATtiny167__)
-#  ifndef TX_PORT
-#define TX_PORT PORTA
-#define TX_PORT_ADDR 0x02 // PORTA
-#define TX_DDR DDRA
-
-//#define TX_PORT PORTB
-//#define TX_PORT_ADDR 0x05
-//#define TX_DDR DDRB
+#if defined(__AVR_ATtiny87__) || defined(__AVR_ATtiny167__) // For use with ATTinyCore
+#  if !defined(TX_PORT)
+#    if TX_PIN == PIN_PA0 || TX_PIN == PIN_PA1 || TX_PIN == PIN_PA2 || TX_PIN == PIN_PA3 \
+    || TX_PIN == PIN_PA4 || TX_PIN == PIN_PA5 || TX_PIN == PIN_PA6 || TX_PIN == PIN_PA7
+#define TX_PORT         PORTA
+#define TX_PORT_ADDR    0x02 // from #define PORTA _SFR_IO8(0x02)
+#define TX_DDR          DDRA
+#    else
+#define TX_PORT         PORTB
+#define TX_PORT_ADDR    0x05 // from #define PORTB _SFR_IO8(0x05)
+#define TX_DDR          DDRB
+#    endif
 #  endif
 
 #elif defined(__AVR_ATtiny88__)
 //  MH-ET LIVE Tiny88(16.0MHz) board
-#define TX_PORT PORTD
-#define TX_PORT_ADDR 0x0B // PORTD
-#define TX_DDR DDRD
+#define TX_PORT         PORTD
+#define TX_PORT_ADDR    0x0B // PORTD
+#define TX_DDR          DDRD
+
+#elif defined(__AVR_ATtiny84__) // For use with ATTinyCore
+#  if TX_PIN == PIN_PA0 || TX_PIN == PIN_PA1 || TX_PIN == PIN_PA2 || TX_PIN == PIN_PA3 \
+    || TX_PIN == PIN_PA4 || TX_PIN == PIN_PA5 || TX_PIN == PIN_PA6 || TX_PIN == PIN_PA7
+#define TX_PORT         PORTA
+#define TX_PORT_ADDR    0x1B
+#define TX_DDR          DDRA
+#  else
+#define TX_PORT         PORTB
+#define TX_PORT_ADDR    0x18
+#define TX_DDR          DDRB
+#  endif
 
 #else
 //  ATtinyX5 here
-#define TX_PORT PORTB
-#define TX_PORT_ADDR 0x18 // PORTB
-#define TX_DDR DDRB
+#define TX_PORT         PORTB
+#define TX_PORT_ADDR    0x18 // PORTB
+#define TX_DDR          DDRB
 #endif // defined(__AVR_ATtiny87__) || defined(__AVR_ATtiny167__)
+
+#if defined(digitalPinToPCMSKbit)
+#define TX_BIT_NUMBER   digitalPinToPCMSKbit(TX_PIN)
+#else
+#define TX_BIT_NUMBER   TX_PIN
+#endif
 
 void write1Start8Data1StopNoParity(uint8_t aValue);
 
 bool sUseCliSeiForWrite = true;
 
+/*
+ * The Serial Instance!!!
+ */
+// #if ... to be compatible with ATTinyCores and AttinyDigisparkCores
+#if (!defined(UBRRH) && !defined(UBRR0H)) /*AttinyDigisparkCore and AttinyDigisparkCore condition*/ \
+    || USE_SOFTWARE_SERIAL /*AttinyDigisparkCore condition*/\
+    || ((defined(UBRRH) || defined(UBRR0H) || defined(UBRR1H) || defined(LINBRRH)) && !USE_SOFTWARE_SERIAL)/*AttinyDigisparkCore condition for HardwareSerial*/
+// Switch to SerialOut since Serial is already defined
+// or activate line 745 in TinyDebugSerial.h included in AttinyDigisparkCores/src/tiny/WProgram.h at line 24 for AttinyDigisparkCores
+TinySerialOut SerialOut;
+#else
+TinySerialOut Serial;
+#endif
+
+/*
+ * Must be called once if pin is not set to output otherwise
+ */
 void initTXPin() {
     // TX_PIN is active LOW, so set it to HIGH initially
-    TX_PORT |= (1 << TX_PIN);
+    TX_PORT |= (1 << TX_BIT_NUMBER);
     // set pin direction to output
-    TX_DDR |= (1 << TX_PIN);
+    TX_DDR |= (1 << TX_BIT_NUMBER);
 }
 
 void write1Start8Data1StopNoParityWithCliSei(uint8_t aValue) {
@@ -104,13 +146,13 @@ void useCliSeiForStrings(bool aUseCliSeiForWrite) {
  * Write String residing in RAM
  */
 void writeString(const char *aStringPtr) {
-#ifndef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if !defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
     if (sUseCliSeiForWrite) {
 #endif
         while (*aStringPtr != 0) {
             write1Start8Data1StopNoParityWithCliSei(*aStringPtr++);
         }
-#ifndef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if !defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
     } else {
         while (*aStringPtr != 0) {
             write1Start8Data1StopNoParity(*aStringPtr++);
@@ -120,13 +162,13 @@ void writeString(const char *aStringPtr) {
 }
 
 /*
- * Write string residing in program space (FLASH)
+ * Write string residing in program memory (FLASH)
  */
 void writeString_P(const char *aStringPtr) {
-    uint8_t tChar = pgm_read_byte((const uint8_t * ) aStringPtr);
+    uint8_t tChar = pgm_read_byte((const uint8_t* ) aStringPtr);
 // Comparing with 0xFF is safety net for wrong string pointer
     while (tChar != 0 && tChar != 0xFF) {
-#ifdef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
         write1Start8Data1StopNoParityWithCliSei(tChar);
 #else
         if (sUseCliSeiForWrite) {
@@ -135,19 +177,19 @@ void writeString_P(const char *aStringPtr) {
             write1Start8Data1StopNoParity(tChar);
         }
 #endif
-        tChar = pgm_read_byte((const uint8_t * ) ++aStringPtr);
+        tChar = pgm_read_byte((const uint8_t* ) ++aStringPtr);
     }
 }
 
 /*
- * Write string residing in program space (FLASH)
+ * Write string residing in program memory (FLASH)
  */
 void writeString(const __FlashStringHelper *aStringPtr) {
     PGM_P tPGMStringPtr = reinterpret_cast<PGM_P>(aStringPtr);
-    uint8_t tChar = pgm_read_byte((const uint8_t * ) aStringPtr);
+    uint8_t tChar = pgm_read_byte((const uint8_t* ) aStringPtr);
 // Comparing with 0xFF is safety net for wrong string pointer
     while (tChar != 0 && tChar != 0xFF) {
-#ifdef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
         write1Start8Data1StopNoParityWithCliSei(tChar);
 #else
         if (sUseCliSeiForWrite) {
@@ -156,7 +198,7 @@ void writeString(const __FlashStringHelper *aStringPtr) {
             write1Start8Data1StopNoParity(tChar);
         }
 #endif
-        tChar = pgm_read_byte((const uint8_t * ) ++tPGMStringPtr);
+        tChar = pgm_read_byte((const uint8_t* ) ++tPGMStringPtr);
     }
 }
 
@@ -164,10 +206,10 @@ void writeString(const __FlashStringHelper *aStringPtr) {
  * Write string residing in EEPROM space
  */
 void writeString_E(const char *aStringPtr) {
-    uint8_t tChar = eeprom_read_byte((const uint8_t *) aStringPtr);
+    uint8_t tChar = eeprom_read_byte((const uint8_t*) aStringPtr);
     // Comparing with 0xFF is safety net for wrong string pointer
     while (tChar != 0 && tChar != 0xFF) {
-#ifdef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
         write1Start8Data1StopNoParityWithCliSei(tChar);
 #else
         if (sUseCliSeiForWrite) {
@@ -176,7 +218,7 @@ void writeString_E(const char *aStringPtr) {
             write1Start8Data1StopNoParity(tChar);
         }
 #endif
-        tChar = eeprom_read_byte((const uint8_t *) ++aStringPtr);
+        tChar = eeprom_read_byte((const uint8_t*) ++aStringPtr);
     }
 }
 
@@ -197,13 +239,13 @@ void writeStringSkipLeadingSpaces(const char *aStringPtr) {
     while (*aStringPtr == ' ' && *aStringPtr != 0) {
         aStringPtr++;
     }
-#ifndef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if !defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
     if (sUseCliSeiForWrite) {
 #endif
         while (*aStringPtr != 0) {
             write1Start8Data1StopNoParityWithCliSei(*aStringPtr++);
         }
-#ifndef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if !defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
     } else {
         while (*aStringPtr != 0) {
             write1Start8Data1StopNoParity(*aStringPtr++);
@@ -213,7 +255,7 @@ void writeStringSkipLeadingSpaces(const char *aStringPtr) {
 }
 
 void writeBinary(uint8_t aByte) {
-#ifdef USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT
+#if defined(USE_ALWAYS_CLI_SEI_GUARD_FOR_OUTPUT)
     write1Start8Data1StopNoParityWithCliSei(aByte);
 #else
     if (sUseCliSeiForWrite) {
@@ -240,7 +282,7 @@ void writeUnsignedByte(uint8_t aByte) {
 }
 
 /*
- * 2 Byte Hex output
+ * 2 byte Hex output
  */
 void writeUnsignedByteHex(uint8_t aByte) {
     char tStringBuffer[3];
@@ -258,7 +300,7 @@ void writeUnsignedByteHex(uint8_t aByte) {
 }
 
 /*
- * 2 Byte Hex output with 2 Byte prefix "0x"
+ * 2 byte Hex output with 2 byte prefix "0x"
  */
 void writeUnsignedByteHexWithPrefix(uint8_t aByte) {
     writeBinary('0');
@@ -325,7 +367,7 @@ void writeFloat(double aFloat, uint8_t aDigits) {
  */
 void TinySerialOut::begin(long aBaudrate) {
     initTXPin();
-#if defined(USE_115200BAUD) // else smaller code, but only 38400 baud at 1 MHz
+#if defined(_USE_115200BAUD) // else smaller code, but only 38400 baud at 1 MHz
     if (aBaudrate != 115200) {
         println(F("Only 115200 supported!"));
     }
@@ -351,7 +393,7 @@ void TinySerialOut::flush() {
 }
 
 /*
- * 2 Byte Hex output with 2 Byte prefix "0x"
+ * 2 byte Hex output with 2 byte prefix "0x"
  */
 void TinySerialOut::printHex(uint8_t aByte) {
     writeUnsignedByteHexWithPrefix(aByte);
@@ -377,6 +419,7 @@ size_t TinySerialOut::write(uint8_t aByte) {
     writeBinary(aByte);
     return 1;
 }
+#if !defined(TINY_SERIAL_INHERIT_FROM_PRINT)
 
 void TinySerialOut::print(const char *aStringPtr) {
     writeString(aStringPtr);
@@ -482,20 +525,7 @@ void TinySerialOut::println() {
     print('\r');
     print('\n');
 }
-
-/*
- * The Serial Instance!!!
- */
-// #if ... to be compatible with ATTinyCores and AttinyDigisparkCores
-#if (!defined(UBRRH) && !defined(UBRR0H)) /*AttinyDigisparkCore and AttinyDigisparkCore condition*/ \
-    || USE_SOFTWARE_SERIAL /*AttinyDigisparkCore condition*/\
-    || ((defined(UBRRH) || defined(UBRR0H) || defined(UBRR1H) || defined(LINBRRH)) && !USE_SOFTWARE_SERIAL)/*AttinyDigisparkCore condition for HardwareSerial*/
-// Switch to SerialOut since Serial is already defined
-// or activate line 745 in TinyDebugSerial.h included in AttinyDigisparkCores/src/tiny/WProgram.h at line 24 for AttinyDigisparkCores
-TinySerialOut SerialOut;
-#else
-TinySerialOut Serial;
-#endif
+#endif // !defined(TINY_SERIAL_INHERIT_FROM_PRINT)
 
 /********************************
  * Basic serial output function
@@ -520,12 +550,12 @@ inline void delay4CyclesExact(uint16_t a4Microseconds) {
     );
 }
 
-#if (F_CPU == 1000000) && defined(USE_115200BAUD) //else smaller code, but only 38400 baud at 1 MHz
+#if (F_CPU == 1000000) && defined(_USE_115200BAUD) // else smaller code, but only 38400 baud at 1 MHz
 /*
  * 115200 baud - 8,680 cycles per bit, 86,8 per byte at 1 MHz
  *
  *  Assembler code for 115200 baud extracted from Digispark core files:
- *  Code size is 196 Byte (including first call)
+ *  Code size is 196 byte (including first call)
  *
  *   TinySerialOut.h - Tiny write-only software serial.
  *   Copyright 2010 Rowdy Dog Software. This code is part of Arduino-Tiny.
@@ -670,12 +700,12 @@ void write1Start8Data1StopNoParity(uint8_t aValue) {
             :
             [value] "r" ( aValue ),
             [txport] "I" ( TX_PORT_ADDR ),
-            [txpin] "I" ( TX_PIN )
+            [txpin] "I" ( TX_BIT_NUMBER )
     );
 }
 #else
 /*
- * Small code using loop. Code size is 76 Byte (including first call)
+ * Small code using loop. Code size is 76 byte (including first call)
  *
  * 1 MHz CPU Clock
  *  26,04 cycles per bit, 260,4 per byte for 38400 baud at 1 MHz Clock
@@ -697,23 +727,23 @@ void write1Start8Data1StopNoParity(uint8_t aValue) {
 void write1Start8Data1StopNoParity(uint8_t aValue) {
     asm volatile
     (
-            "cbi  %[txport] , %[txpin]" "\n\t" // 2    PORTB &= ~(1 << TX_PIN);
-#if (F_CPU == 1000000) && !defined(USE_115200BAUD) // 1 MHz 38400 baud
+            "cbi  %[txport] , %[txpin]" "\n\t" // 2    PORTB &= ~(1 << TX_BIT_NUMBER);
+#if (F_CPU == 1000000) && !defined(_USE_115200BAUD) // 1 MHz 38400 baud
             // 0 cycles padding to get additional 4 cycles
             //delay4CyclesExact(5); -> 20 cycles
             "ldi  r30 , 0x05" "\n\t"// 1
-#elif ((F_CPU == 8000000) && defined(USE_115200BAUD)) || ((F_CPU == 16000000) && !defined(USE_115200BAUD)) // 8 MHz 115200 baud OR 16 MHz 230400 baud
+#elif ((F_CPU == 8000000) && defined(_USE_115200BAUD)) || ((F_CPU == 16000000) && !defined(_USE_115200BAUD)) // 8 MHz 115200 baud OR 16 MHz 230400 baud
             // 3 cycles padding to get additional 7 cycles
             "nop" "\n\t"// 1    _nop"();
             "nop" "\n\t"// 1    _nop"();
             "nop" "\n\t"// 1    _nop"();
             //delay4CyclesExact(15); -> 61 cycles
             "ldi  r30 , 0x0F" "\n\t"// 1
-#elif (F_CPU == 8000000) && !defined(USE_115200BAUD) // 8 MHz 230400 baud
+#elif (F_CPU == 8000000) && !defined(_USE_115200BAUD) // 8 MHz 230400 baud
             // 0 cycles padding to get additional 4 cycles
             //delay4CyclesExact(7); -> 29 cycles
             "ldi  r30 , 0x07" "\n\t"// 1
-#elif (F_CPU == 16000000) && defined(USE_115200BAUD) // 16 MHz 115200 baud
+#elif (F_CPU == 16000000) && defined(_USE_115200BAUD) // 16 MHz 115200 baud
             // 0 cycles padding to get additional 4 cycles
             //delay4CyclesExact(33); -> 133 cycles
             "ldi  r30 , 0x21" "\n\t"// 1
@@ -732,33 +762,33 @@ void write1Start8Data1StopNoParity(uint8_t aValue) {
             "rjmp .+6" "\n\t"// 2
 
             "nop" "\n\t"// 1
-            "sbi %[txport] , %[txpin]" "\n\t"// 2    PORTB |= 1 << TX_PIN;
+            "sbi %[txport] , %[txpin]" "\n\t"// 2    PORTB |= 1 << TX_BIT_NUMBER;
             "rjmp .+6" "\n\t"// 2
 
-            "cbi %[txport] , %[txpin]" "\n\t"// 2    PORTB &= ~(1 << TX_PIN);
+            "cbi %[txport] , %[txpin]" "\n\t"// 2    PORTB &= ~(1 << TX_BIT_NUMBER);
             "nop" "\n\t"// 1
             "nop" "\n\t"// 1
             "lsr %[value]" "\n\t"// 1    aValue = aValue >> 1;
 
-#if (F_CPU == 1000000) && !defined(USE_115200BAUD) // 1 MHz 38400 baud
+#if (F_CPU == 1000000) && !defined(_USE_115200BAUD) // 1 MHz 38400 baud
             // 3 cycles padding to get additional 11 cycles
             "nop" "\n\t"// 1
             "nop" "\n\t"// 1
             "nop" "\n\t"// 1
             // delay4CyclesExact(3); -> 13 cycles
             "ldi  r30 , 0x03" "\n\t"// 1
-#elif ((F_CPU == 8000000) && defined(USE_115200BAUD)) || ((F_CPU == 16000000) && !defined(USE_115200BAUD)) // 8 MHz 115200 baud OR 16 MHz 230400 baud
+#elif ((F_CPU == 8000000) && defined(_USE_115200BAUD)) || ((F_CPU == 16000000) && !defined(_USE_115200BAUD)) // 8 MHz 115200 baud OR 16 MHz 230400 baud
             // 3 cycles padding to get additional 11 cycles
             "nop" "\n\t"// 1
             "nop" "\n\t"// 1
             "nop" "\n\t"// 1
             // delay4CyclesExact(14); -> 57 cycles
             "ldi r30 , 0x0E" "\n\t"// 1
-#elif (F_CPU == 8000000) && !defined(USE_115200BAUD) // 8 MHz 230400 baud
+#elif (F_CPU == 8000000) && !defined(_USE_115200BAUD) // 8 MHz 230400 baud
             // 0 cycles padding to get additional 8 cycles
             // delay4CyclesExact(6); -> 25 cycles
             "ldi r30 , 0x05" "\n\t"// 1
-#elif (F_CPU == 16000000) && defined(USE_115200BAUD) // 16 MHz 115200 baud
+#elif (F_CPU == 16000000) && defined(_USE_115200BAUD) // 16 MHz 115200 baud
             // 0 cycles padding to get additional 8 cycles
             //delay4CyclesExact(32); -> 129 cycles
             "ldi  r30 , 0x20" "\n\t"// 1
@@ -778,18 +808,18 @@ void write1Start8Data1StopNoParity(uint8_t aValue) {
             "nop" "\n\t"// 1
 
             // Stop bit
-            "sbi %[txport] , %[txpin]" "\n\t"// 2    PORTB |= 1 << TX_PIN;
+            "sbi %[txport] , %[txpin]" "\n\t"// 2    PORTB |= 1 << TX_BIT_NUMBER;
 
-#if (F_CPU == 1000000) && !defined(USE_115200BAUD) // 1 MHz 38400 baud
+#if (F_CPU == 1000000) && !defined(_USE_115200BAUD) // 1 MHz 38400 baud
             // delay4CyclesExact(4); -> 17 cycles - gives minimum 25 cycles for stop bit
             "ldi  r30 , 0x04" "\n\t"// 1
-#elif ((F_CPU == 8000000) && defined(USE_115200BAUD)) || ((F_CPU == 16000000) && !defined(USE_115200BAUD)) // 8 MHz 115200 baud OR 16 MHz 230400 baud
+#elif ((F_CPU == 8000000) && defined(_USE_115200BAUD)) || ((F_CPU == 16000000) && !defined(_USE_115200BAUD)) // 8 MHz 115200 baud OR 16 MHz 230400 baud
             // delay4CyclesExact(15) -> 61 cycles - gives minimum 69 cycles for stop bit
             "ldi r30 , 0x0F" "\n\t"// 1
-#elif (F_CPU == 8000000) && !defined(USE_115200BAUD) // 8 MHz 230400 baud
+#elif (F_CPU == 8000000) && !defined(_USE_115200BAUD) // 8 MHz 230400 baud
             // delay4CyclesExact(5) -> 27 cycles - gives minimum 35 cycles for stop bit
             "ldi r30 , 0x05" "\n\t"// 1
-#elif (F_CPU == 16000000) && defined(USE_115200BAUD) // 16 MHz 115200 baud
+#elif (F_CPU == 16000000) && defined(_USE_115200BAUD) // 16 MHz 115200 baud
             // delay4CyclesExact(32) -> 129 cycles - gives minimum 137 cycles for stop bit
             "ldi r30 , 0x20" "\n\t"// 1
 #endif
@@ -803,7 +833,7 @@ void write1Start8Data1StopNoParity(uint8_t aValue) {
             :
             [value] "r" ( aValue ),
             [txport] "I" ( TX_PORT_ADDR ) , /* 0x18 is PORTB on Attiny 85 */
-            [txpin] "I" ( TX_PIN )
+            [txpin] "I" ( TX_BIT_NUMBER )
             :
             "r25",
             "r30",
@@ -825,7 +855,7 @@ void write1Start8Data1StopNoParity_C_Version(uint8_t aValue) {
      * C Version here for 38400 baud at 1 MHz Clock. You see, it is simple :-)
      */
 // start bit
-    TX_PORT &= ~(1 << TX_PIN);
+    TX_PORT &= ~(1 << TX_BIT_NUMBER);
     _NOP();
     delay4CyclesExact(4);
 
@@ -836,10 +866,10 @@ void write1Start8Data1StopNoParity_C_Version(uint8_t aValue) {
             // bit=1
             // to compensate for jump at data=0
             _NOP();
-            TX_PORT |= 1 << TX_PIN;
+            TX_PORT |= 1 << TX_BIT_NUMBER;
         } else {
             // bit=0
-            TX_PORT &= ~(1 << TX_PIN);
+            TX_PORT &= ~(1 << TX_BIT_NUMBER);
             // compensate for different cycles of sbrs
             _NOP();
             _NOP();
@@ -860,7 +890,7 @@ void write1Start8Data1StopNoParity_C_Version(uint8_t aValue) {
     _NOP();
 
 // Stop bit
-    TX_PORT |= 1 << TX_PIN;
+    TX_PORT |= 1 << TX_BIT_NUMBER;
 // -8 cycles to compensate for fastest repeated call (1 ret + 1 load + 1 call)
     delay4CyclesExact(4); // gives minimum 25 cycles for stop bit :-)
 }
@@ -869,3 +899,5 @@ void write1Start8Data1StopNoParity_C_Version(uint8_t aValue) {
         ;
     }
 #endif // defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__) || defined(__AVR_ATtiny87__) || defined(__AVR_ATtiny167__)
+
+#endif // _ATTINY_SERIAL_OUT_HPP

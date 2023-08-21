@@ -16,11 +16,11 @@
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *  See the GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with this program.  If not, see <http://www.gnu.org/licenses/gpl.html>.
+ *  along with this program. If not, see <http://www.gnu.org/licenses/gpl.html>.
  *
  *
  * On ramp start:
@@ -61,19 +61,25 @@
 #include <Arduino.h>
 #include "TRIACRamp.h"
 
-#include <avr/io.h>
 #include "digitalWriteFast.h"
 
+#if defined(INFO)
 #include "ATtinySerialOut.h"
+#endif
+
+#include <avr/io.h>
+
+struct RampControlStruct RampControl;
+
+#if defined(LOAD_ON_OFF_DETECTION)
+uint16_t readLoadDetectionVoltage();
+void checkForLoadAttached(uint16_t tLoadDetectionVoltage);
+#endif
 
 void initRampControl() {
     // Pin is active LOW, so set it to HIGH initially
     digitalWriteFast(TRIACControlOutput, HIGH);
     pinModeFast(TRIACControlOutput, OUTPUT);
-
-    // Enable zero crossing interrupt at PB2
-    GIMSK = (1 << INT0); // Enable INT0 (50/60 HZ input)
-    MCUCR = (1 << ISC00); // interrupt on any edge for INT0 to get 100/120 Hz interrupts
 
     /*
      * Setup Timer0 for ramp delay after zero crossing and measurement of mains period.
@@ -82,25 +88,29 @@ void initRampControl() {
      */
 // Fast PWM mode: timer counts up from 0 to 0xFF and generates interrupt at OCRA
     TCCR0A = TIMER0_FAST_PWM;
-#if (F_CPU == 1000000)
     //Start Timer 0 1MHz/64 -> 64 us clock -> gives 156 counts for 10 ms
-    TCCR0B = TIMER0_CLOCK_DIVIDER_FOR_64_MICROS;
-#endif
-#if (F_CPU == 8000000)
     //Start Timer 0 8MHz/10254 -> 128 us clock -> gives 78 counts for 10 ms
-    TCCR0B = TIMER0_CLOCK_DIVIDER_FOR_128_MICROS;
-#endif
+    TCCR0B = TIMER0_CLOCK_DIVIDER_BITS;
+
     TCNT0 = 0;
     OCR0A = OCRA_VALUE_FOR_NO_POWER;
 
     RampControl.NextOCRA = OCRA_VALUE_FOR_NO_POWER; // to avoid triggering the TRIAC - 0xFF means full power mode with no minimal phase count and should not be used here
     RampControl.SoftStartState = TRIAC_CONTROL_STATE_STOP;
-    RampControl.DoWriteRampData = false;
-#ifdef INFO
-    RampControl.CalibrationModeActive = false;
-#endif
     // TODO use EEPROM for this value
     RampControl.MainsHalfWaveTimerCount = TIMER_COUNT_AT_ZERO_CROSSING; // initialize value
+#if defined(INFO)
+    RampControl.DoWriteRampData = false;
+#endif
+#if defined(LOAD_ON_OFF_DETECTION)
+    RampControl.NoLoadADCReferenceValue = readLoadDetectionVoltage();
+    RampControl.isLoadAttached = false;
+    RampControl.isLoadAttachedStateJustChanged = false;
+#endif
+
+    // Enable zero crossing interrupt at PB2
+    GIMSK = (1 << INT0); // Enable INT0 (50/60 HZ input)
+    MCUCR = (1 << ISC00); // interrupt on any edge for INT0 to get 100/120 Hz interrupts
 }
 
 /*
@@ -111,19 +121,14 @@ void startRamp(void) {
     RampControl.HalfWaveCounterIntern = 0;
     RampControl.MainsHalfWaveTimerCountAccumulated = 0;
     RampControl.NextOCRA = RampControl.MainsHalfWaveTimerCount - START_PHASE_SHIFT_MARGIN_COUNT;
-#ifdef INFO
+#if defined(INFO)
     RampControl.TimerCountAtTriggerPulse = 0;
 #endif
 
-    GIFR = (1 << INTF0) | (1 << PCIF); // reset all interrupt flags
+    GIFR = (1 << INTF0); // reset all interrupt flags
     TIMSK = 0; // Start with all timer interrupts disabled
 
-#ifdef RAMP_INDICATOR_LED
-    // switch LED on
-    digitalWriteFast(LED_PIN, 0);
-#endif
     RampControl.SoftStartState = TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING;
-
 }
 
 void stopRamp() {
@@ -134,11 +139,6 @@ void stopRamp() {
 
     // set TRIAC pin to inactive
     digitalWriteFast(TRIACControlOutput, 1);
-
-#ifdef RAMP_INDICATOR_LED
-    // switch LED off
-    digitalWriteFast(LED_PIN, 1);
-#endif
 }
 
 void switchToFullPower() {
@@ -147,13 +147,12 @@ void switchToFullPower() {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverflow"
 // truncation is intended!
-    RampControl.NextOCRA = TIMER0_COUNTER_TOP + MINIMUM_PHASE_SHIFT_COUNT;
+    RampControl.NextOCRA = TIMER0_COUNTER_TOP;
 #pragma GCC diagnostic pop
 }
 
-
 void setRampDurationSeconds(uint16_t aRampDurationSeconds) {
-    uint32_t tValue = ((uint32_t) TIMER_COUNT_AT_ZERO_CROSSING << 16) / HALF_WAVES_PER_SECOND; // 0x00018CCC
+    uint32_t tValue = ((uint32_t) (TIMER_COUNT_AT_ZERO_CROSSING - MINIMUM_PHASE_SHIFT_COUNT) << 16) / HALF_WAVES_PER_SECOND; // 0x00018CCC
     if (aRampDurationSeconds == 0) {
         RampControl.DelayDecrementPerHalfWaveShift16 = tValue * 4; // Quarter of a second, 12.5 full mains periods to full power
     } else {
@@ -163,11 +162,13 @@ void setRampDurationSeconds(uint16_t aRampDurationSeconds) {
 
 void setRampDurationMillis(uint32_t aRampDurationMillis) {
     if (aRampDurationMillis == 0) {
-        RampControl.DelayDecrementPerHalfWaveShift16 = ((uint32_t) TIMER_COUNT_AT_ZERO_CROSSING << 16) / 4; // 2 full mains periods to full power
+        RampControl.DelayDecrementPerHalfWaveShift16 = ((uint32_t) (TIMER_COUNT_AT_ZERO_CROSSING - MINIMUM_PHASE_SHIFT_COUNT) << 16)
+                / 4; // 2 full mains periods to full power
     } else {
         // 0x060E0000 / aRampDurationMillis - instead of *1000 use *100 and /10 in divisor to avoid 32 bit overflow
-        RampControl.DelayDecrementPerHalfWaveShift16 = (((uint32_t) TIMER_COUNT_AT_ZERO_CROSSING << 16) * 100)
-                / (HALF_WAVES_PER_SECOND / 10) / aRampDurationMillis;
+        RampControl.DelayDecrementPerHalfWaveShift16 =
+                (((uint32_t) (TIMER_COUNT_AT_ZERO_CROSSING - MINIMUM_PHASE_SHIFT_COUNT) << 16) * 100) / (HALF_WAVES_PER_SECOND / 10)
+                        / aRampDurationMillis;
     }
 }
 
@@ -192,32 +193,37 @@ ISR(INT0_vect) {
      */
     GTCCR = (1 << PSR0);
 
-// reset counter to top in order to reload ocra at next clock
     OCR0A = RampControl.NextOCRA;
+    // reset counter to top in order to reload OCRA at next clock
     TCNT0 = TIMER0_COUNTER_TOP;
 
-    /*
-     * Now begin state machine
-     */
-    if (RampControl.NextOCRA == TIMER_VALUE_FOR_FULL_POWER) {
-        // TRIAC_CONTROL_STATE_FULL_POWER with MINIMUM_PHASE_SHIFT_COUNT == 0 here.
+    RampControl.HalfWaveJustStarted = true;
+
+    if (RampControl.NextOCRA == TIMER0_COUNTER_TOP) {
         // Here no additional delay, no timer counting from 0xFF to 0x00,
         // so there is a step in delay from last ramp delay to full power of (measured) 160 microseconds
         StartTriacPulse();
+        // do it after StartTriacPulse() to avoid delay
         RampControl.HalfWaveCounterForExternalTiming++;
-        RampControl.HalfWaveAtFullPowerJustStarted = true;
         return;
     }
     RampControl.HalfWaveCounterForExternalTiming++;
 
+    /*
+     * Now begin state machine
+     */
     if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_STOP) {
-        // do nothing;
+        // just change nothing, use OCR0A value already set at stop.
         return;
     }
 
-#ifdef INFO
-    if (RampControl.CalibrationModeActive) {
+    if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_FULL_POWER) {
+        // just change nothing, use OCR0A value already set at end of ramp.
+        return;
+    }
 
+#if defined(INFO)
+    if (RampControl.SoftStartState == TRIAC_CONTROL_STATE_CALIBRATION) {
         /*
          * TEST / CALIBRATION here: output actual counter forever in order to adjust the 50% duty cycle trimmer
          */
@@ -238,7 +244,7 @@ ISR(INT0_vect) {
      */
     if (tTimerCounterValue < (RampControl.MainsHalfWaveTimerCount - ALLOWED_DELTA_PHASE_SHIFT_COUNT)
             || tTimerCounterValue > (RampControl.MainsHalfWaveTimerCount + ALLOWED_DELTA_PHASE_SHIFT_COUNT)) {
-#ifdef ERROR
+#if defined(ERROR)
         write1Start8Data1StopNoParity('N');
         write1Start8Data1StopNoParity('1');
         write1Start8Data1StopNoParity(tTimerCounterValue);
@@ -261,9 +267,9 @@ ISR(INT0_vect) {
              * sum count for one mains phase
              */
             RampControl.MainsHalfWaveTimerCountAccumulated += tTimerCounterValue;
-#ifdef DEBUG
-            write1Start8Data1StopNoParity('A');
-            write1Start8Data1StopNoParity(tTimerCounterValue);
+#if defined(DEBUG)
+    write1Start8Data1StopNoParity('A');
+    write1Start8Data1StopNoParity(tTimerCounterValue);
 #endif
         } else {
             /*
@@ -272,18 +278,18 @@ ISR(INT0_vect) {
             RampControl.MainsHalfWaveTimerCount = (RampControl.MainsHalfWaveTimerCountAccumulated + (SYNCHRONIZING_CYCLES / 2))
                     / SYNCHRONIZING_CYCLES;
 
-            RampControl.TimerCountForTriggerDelayShift16.word.LowWord = 0;
-            RampControl.TimerCountForTriggerDelayShift16.word.HighWord = RampControl.MainsHalfWaveTimerCount
+            RampControl.TimerCountForTriggerDelayShift16.UWord.LowWord = 0;
+            RampControl.TimerCountForTriggerDelayShift16.UWord.HighWord = RampControl.MainsHalfWaveTimerCount
                     - START_PHASE_SHIFT_MARGIN_COUNT;
             RampControl.NextOCRA = RampControl.MainsHalfWaveTimerCount - START_PHASE_SHIFT_MARGIN_COUNT;
             RampControl.NextMicrosecondsDelayForTriggerPulse = 0;
 
             TIFR = (1 << OCF0A) | (1 << TOV1);    // Otherwise an interrupt is generated directly
-            TCCR1 = 0; // stop timer 1 - is required here even if no one starts it before
-            TIMSK = (1 << OCIE0A) | (1 << TOIE1); // Timer0 output compare match int enabled + Timer1 overflow int enabled
+            TCCR1 = 0;    // stop timer 1 - is required here even if no one starts it before
+            TIMSK = (1 << OCIE0A) | (1 << TOIE1);    // Timer0 output compare match int enabled + Timer1 overflow int enabled
 
             RampControl.SoftStartState = TRIAC_CONTROL_STATE_RAMP_UP;
-#ifdef INFO
+#if defined(INFO)
             write1Start8Data1StopNoParity('M');
             write1Start8Data1StopNoParity('P');
             write1Start8Data1StopNoParity(RampControl.MainsHalfWaveTimerCount);
@@ -303,7 +309,7 @@ ISR(INT0_vect) {
              * Noise here. tTimerCounterValue not in the expected range
              * Printing of noise may lead to delaying the next interrupt and therefore missing the right count value
              */
-#ifdef ERROR
+#if defined(ERROR)
             write1Start8Data1StopNoParity('N');
             write1Start8Data1StopNoParity('2');
             write1Start8Data1StopNoParity(tTimerCounterValue);
@@ -313,7 +319,7 @@ ISR(INT0_vect) {
             /*
              * TRIAC_CONTROL_STATE_RAMP_UP  && No noise
              */
-            if ((RampControl.TimerCountForTriggerDelayShift16.word.HighWord) > MINIMUM_PHASE_SHIFT_COUNT) {
+            if ((RampControl.TimerCountForTriggerDelayShift16.UWord.HighWord) > MINIMUM_PHASE_SHIFT_COUNT) {
                 /*
                  *  Normal ramp -> compute trigger delay value for next mains phase / interrupt - handle underflow
                  *  decrement duration, set timer (compute current zero crossing count) and check for end
@@ -330,12 +336,12 @@ ISR(INT0_vect) {
                 /*
                  * Because of double buffering OCRA will be active at next period
                  */
-                RampControl.NextOCRA = RampControl.TimerCountForTriggerDelayShift16.byte.MidHighByte;
+                RampControl.NextOCRA = RampControl.TimerCountForTriggerDelayShift16.UByte.MidHighByte;
                 // Results in value from 0 to TIMER0_CLOCK_CYCLE_MICROS
-                RampControl.NextMicrosecondsDelayForTriggerPulse = RampControl.TimerCountForTriggerDelayShift16.byte.MidLowByte
+                RampControl.NextMicrosecondsDelayForTriggerPulse = RampControl.TimerCountForTriggerDelayShift16.UByte.MidLowByte
                         / (256 / TIMER0_CLOCK_CYCLE_MICROS);
 
-#ifdef INFO
+#if defined(INFO)
                 /*
                  * Delegate printing to main loop, otherwise it may delay TRIAC trigger
                  */
@@ -346,16 +352,8 @@ ISR(INT0_vect) {
                  * End of ramp -> switch to full power
                  */
                 switchToFullPower();
-#ifdef RAMP_INDICATOR_LED
-                // switch LED off
-                digitalWriteFast(LED_PIN, 1);
-#endif
             }
         }
-    } else /*if (sZeroCrossingState == TRIAC_CONTROL_STATE_FULL_POWER)*/{
-        /*
-         * TRIAC_CONTROL_STATE_FULL_POWER here -> to keep it simple, just change nothing, use values already set at end of ramp.
-         */
     }
 }
 
@@ -366,7 +364,13 @@ ISR(INT0_vect) {
 ISR(TIMER0_COMPA_vect) {
 // additional delay for finer ramp/delay resolution
     delayMicroseconds(RampControl.MicrosecondsDelayForTriggerPulse);
+#if defined(LOAD_ON_OFF_DETECTION)
+    uint16_t tLoadDetectionVoltage = readLoadDetectionVoltage();
+#endif
     StartTriacPulse();
+#if defined(LOAD_ON_OFF_DETECTION)
+    checkForLoadAttached(tLoadDetectionVoltage);
+#endif
 }
 
 /*
@@ -376,7 +380,7 @@ ISR(TIMER0_COMPA_vect) {
 void StartTriacPulse(void) {
 // set TRIAC pin to active
     digitalWriteFast(TRIACControlOutput, 0);
-#ifdef INFO
+#if defined(INFO)
     RampControl.TimerCountAtTriggerPulse = TCNT0;
 #endif
     RampControl.TRIACPulseCount = 1;
@@ -423,7 +427,7 @@ ISR(TIMER1_OVF_vect) {
          * start next TRIAC pulse after the break
          */
         digitalWriteFast(TRIACControlOutput, 0);
-        // start timer1 to end pulse
+// start timer1 to end pulse
         GTCCR = (1 << PSR1); // reset prescaler
         TCNT1 = 0x100 - (TRIAC_PULSE_WIDTH_MICROS / TRIAC_PULSE_TIMER_CLOCK_CYCLE_MICROS);
         TCCR1 = TIMER1_CLOCK_DIVIDER; // normal mode -> gives maximum TRIAC pulse width of 1 Milliseconds for timer clock 4 us and count to 256.
@@ -431,20 +435,16 @@ ISR(TIMER1_OVF_vect) {
     }
 }
 
-#ifdef INFO
-void setCalibrationMode() {
-    RampControl.CalibrationModeActive = true;
-}
-
+#if defined(INFO)
 /*
  * Write output for STATE_RAMP here in order to keep the timing of ISR
  */
 void printRampInfo() {
     if (RampControl.DoWriteRampData) {
         write1Start8Data1StopNoParityWithCliSei('R');
-        // output current trigger delay
-        write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountForTriggerDelayShift16.byte.MidHighByte);
-        write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountForTriggerDelayShift16.byte.MidLowByte);
+// output current trigger delay
+        write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountForTriggerDelayShift16.UByte.MidHighByte);
+        write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountForTriggerDelayShift16.UByte.MidLowByte);
         write1Start8Data1StopNoParityWithCliSei(RampControl.TimerCountAtTriggerPulse);
         write1Start8Data1StopNoParityWithCliSei('\n');
         RampControl.DoWriteRampData = false;
@@ -453,8 +453,8 @@ void printRampInfo() {
 #endif
 
 void checkAndHandleCounterOverflowForLoop() {
-#ifdef INFO
-    if (!RampControl.CalibrationModeActive) {
+#if defined(INFO)
+    if (RampControl.SoftStartState != TRIAC_CONTROL_STATE_CALIBRATION) {
 #endif
         /*
          * Check for counter overflow if load attached, but not in test/calibration mode
@@ -464,7 +464,7 @@ void checkAndHandleCounterOverflowForLoop() {
                 >= (RampControl.MainsHalfWaveTimerCount + (ALLOWED_DELTA_PHASE_SHIFT_COUNT * 2))&& tTimerCounterValue < TIMER_VALUE_FOR_FULL_POWER) {
             // assume missing trigger -> setup counter for next period
             TCNT0 = tTimerCounterValue - RampControl.MainsHalfWaveTimerCount;
-#ifdef ERROR
+#if defined(ERROR)
             if (RampControl.SoftStartState != TRIAC_CONTROL_STATE_STOP) {
                 write1Start8Data1StopNoParityWithCliSei('O');
                 write1Start8Data1StopNoParityWithCliSei('F');
@@ -472,8 +472,71 @@ void checkAndHandleCounterOverflowForLoop() {
                 write1Start8Data1StopNoParityWithCliSei('\n');
             }
 #endif
-#ifdef INFO
+#if defined(INFO)
         }
 #endif
     }
 }
+
+#if defined(LOAD_ON_OFF_DETECTION)
+uint16_t readLoadDetectionVoltage() {
+    WordUnion tUValue;
+    ADMUX = LoadDetectionVoltageInputADCChannel | (DEFAULT << SHIFT_VALUE_FOR_REFERENCE);
+
+    // ADCSRB = 0; // Only active if ADATE is set to 1.
+    // ADSC-StartConversion ADIF-Reset Interrupt Flag - NOT free running mode
+    ADCSRA = (_BV(ADEN) | _BV(ADSC) | _BV(ADIF) | ADC_PRESCALE4); // 52 microseconds per ADC conversion at 1 MHz
+
+    // wait for single conversion to finish
+    loop_until_bit_is_clear(ADCSRA, ADSC);
+
+    // Get value
+    tUValue.UByte.LowByte = ADCL;
+    tUValue.UByte.HighByte = ADCH;
+    return tUValue.UWord;
+}
+
+/*
+ * We are called with the value taken just before the TRIAC pulse.
+ * Check if voltage at load is significant for attached load or not.
+ */
+void checkForLoadAttached(uint16_t tLoadDetectionVoltage) {
+
+    if (RampControl.NoLoadADCReferenceValue - ALLOWED_DELTA_NO_LOAD_LSB
+            < tLoadDetectionVoltage&& tLoadDetectionVoltage < RampControl.NoLoadADCReferenceValue + ALLOWED_DELTA_NO_LOAD_LSB) {
+        /*
+         * No load attached
+         */
+        if (RampControl.isLoadAttached) {
+            /*
+             * when load was attached but now is detached, increment counter until threshold.
+             */
+            RampControl.NoLoadFoundCount++;
+#if defined(INFO)
+            writeString("L");
+            write1Start8Data1StopNoParity(RampControl.NoLoadFoundCount);
+            write1Start8Data1StopNoParity('\n');
+#endif
+            // * 2 since we count each half wave
+            if (RampControl.NoLoadFoundCount >= (PERIODS_THRESHOLD_FOR_LOAD_DETACHED * 2)) {
+                RampControl.isLoadAttached = false;
+            }
+        }
+    } else {
+        /*
+         * Load voltage detected, decrement counter until 0
+         */
+        if (RampControl.NoLoadFoundCount > 0) {
+            RampControl.NoLoadFoundCount--;
+        }
+        /*
+         * threshold for load attached reached.
+         */
+        if (!RampControl.isLoadAttached
+                && RampControl.NoLoadFoundCount
+                        <= ((PERIODS_THRESHOLD_FOR_LOAD_DETACHED - PERIODS_THRESHOLD_FOR_LOAD_ATTACHED) * 2)) {
+            RampControl.isLoadAttached = true;
+        }
+    }
+}
+#endif

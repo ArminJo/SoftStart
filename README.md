@@ -2,7 +2,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Build Status](https://github.com/ArminJo/SoftStart/workflows/LibraryBuild/badge.svg)](https://github.com/ArminJo/SoftStart/actions)
-[![Hit Counter](https://hitcounter.pythonanywhere.com/count/tag.svg?url=https%3A%2F%2Fgithub.com%2FArminJo%2FSoftStart)](https://github.com/brentvollebregt/hit-counter)
+![Hit Counter](https://visitor-badge.laobi.icu/badge?page_id=ArminJo_SoftStart)
 
 Generates TRIAC control pulse for soft start of motors used in circular saw, angle grinder and other DIY tools.
 
@@ -14,7 +14,7 @@ Generates TRIAC control pulse for soft start of motors used in circular saw, ang
 ![Eagle schematics](https://github.com/ArminJo/SoftStart/blob/master/extras/SoftstartPlugIn.png)<br/>
 The eagle files are [here](https://github.com/ArminJo/SoftStart/blob/master/extras).
 
-- Instead of 330 ohm at PB0 you can use a series of 120 ohm with a 220 ohm with 10 nF parallel.
+- Instead of 330 &ohm; at PB0 you can use a series of 120 &ohm; with a 220 &ohm; with 10 nF parallel.
 - The current sense circuit is only required for the plug in soft start adapter mode (`LOAD_ON_OFF_DETECTION` is enabled) to detect power disconnect. In this case the current is limited to 2 A (~ 450 W) if you using 1N4004 diodes. For more power you may use 1N5004 instead and/or use 2 diodes in parallel.
 
 # How it works (after calling startRamp())
@@ -29,7 +29,7 @@ This mode outputs the timer counter value forever (at 115200 Baud (@1MHZ) at pin
 Both values must be the same.
 The output format is: `<counterForPositiveHalfWave>|<counterForNegativeHalfWave>\n`<br/>
 You have to use an isolation transformer to safely read this value.<br/>
-I have not yet tested it, but using **two 1 MOhm resistors instead of the ramp speed trimmer should work too**.
+I have not yet tested it, but using **two 1 M&ohm; resistors instead of the ramp speed trimmer should work too**.
 
 # Fuse values
 FUSE VALUES for **embedded version**, which requires **fast start**, since soft start must begin as soon as power is on.
@@ -47,7 +47,7 @@ You may use the default values or enable additional Brown-out detection eg. at 4
 To customize the software to different requirements, there are some compile options / macros available.<br/>
 Modify it by commenting them out or in, or change the values if applicable. Or define the macro with the -D compiler option for global compile (the latter is not possible with the Arduino IDE, so consider using [Sloeber](https://eclipse.baeyens.it).<br/>
 
-| Option | Default | File | Description |
+| Name | Default value | File | Description |
 |-|-|-|-|
 | `LOAD_ON_OFF_DETECTION` | enabled | SoftStart.cpp | If enabled, the program does not start with ramp at boot up time, but waits for interrupt at LoadDetectionInput (pin 6). This is useful, if you want to build an plug in soft start adapter. It only starts working when the attached device is switched on, e.g. a load is detected. |
 | `START_PHASE_SHIFT_DEGREES` | 160 | TRIACRamp.h | Initial delay of TRIAC trigger impulse. Values from 0 - 180 degrees, but the extremes make no sense. |
@@ -56,16 +56,16 @@ Modify it by commenting them out or in, or change the values if applicable. Or d
 | `TRIAC_PULSE_BREAK_MICROS` | 400 | TRIACRamp.h | Length of break between (multiple) trigger pulses. |
 
 # Modifying compile options
-### Modifying compile options with Arduino IDE
+### Changing include (*.h) files with Arduino IDE
 First, use *Sketch > Show Sketch Folder (Ctrl+K)*.<br/>
-If you did not yet stored the example as your own sketch, then you are instantly in the right library folder.<br/>
+If you have not yet saved the example as your own sketch, then you are instantly in the right library folder.<br/>
 Otherwise you have to navigate to the parallel `libraries` folder and select the library you want to access.<br/>
-In both cases the library files itself are located in the `src` directory.<br/>
+In both cases the library source and include files are located in the libraries `src` directory.<br/>
+The modification must be renewed for each new library version!
 
 ### Modifying compile options with Sloeber IDE
-If you are using Sloeber as your IDE, you can easily define global symbols with *Properties > Arduino > CompileOptions*.<br/>
+If you are using [Sloeber](https://eclipse.baeyens.it) as your IDE, you can easily define global symbols with *Properties > Arduino > CompileOptions*.<br/>
 ![Sloeber settings](https://github.com/ArminJo/ServoEasing/blob/master/pictures/SloeberDefineSymbols.png)
-
 
 # Pictures
 | | |

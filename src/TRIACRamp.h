@@ -10,10 +10,11 @@
  * Definitions for Attiny85
  */
 
-#ifndef TRIACRAMP_H_
-#define TRIACRAMP_H_
+#ifndef _TRIAC_RAMP_H
+#define _TRIAC_RAMP_H
 
 #include "ATtinyUtils.h" // for TIMER1_CLOCK_DIVIDER_FOR_8_MICROS etc.
+#include "LongUnion.h"
 #include <stdint.h>
 
 //#define DEBUG // for debug output
@@ -41,12 +42,15 @@
 #define TRIACControlOutput PB0          // active LOW
 #define ZeroVoltageDetectionInput PB2   // generates interrupts at both edges
 
-#define LED_PIN PB1
-#if defined(TX_PIN) && defined(LED_PIN) && (LED_PIN != TX_PIN)
-#error LED pin must be equal TX pin.
-#endif
-// #define RAMP_INDICATOR_LED LED_PIN // activate it, if no led for indicating ramp is used
+#define LoadDetectionVoltageInputADCChannel 2
+#define ALLOWED_DELTA_NO_LOAD_LSB 10
+#define PERIODS_THRESHOLD_FOR_LOAD_DETACHED 25 // periods without a load until off
+#define PERIODS_THRESHOLD_FOR_LOAD_ATTACHED 4 // periods with a load until on
 
+// Check for -DTX_PIN=PB1 compile parameter. Not required if ATtinySerialOut.hpp is included.
+#if defined(TX_PIN) && (PB1 != TX_PIN)
+#error TX pin must be PB1.
+#endif
 /*
  * Timer definitions
  */
@@ -56,19 +60,19 @@
 #define TIMER_VALUE_FOR_FULL_POWER TIMER0_COUNTER_TOP // this value must be > TIMER_COUNT_AT_ZERO_CROSSING
 #define OCRA_VALUE_FOR_NO_POWER 0xFE // this value must be != TIMER_VALUE_FOR_FULL_POWER and > TIMER_COUNT_AT_ZERO_CROSSING
 
-#if (F_CPU != 1000000) &&  (F_CPU != 8000000)
+#if (F_CPU == 1000000)
+#define TIMER0_CLOCK_CYCLE_MICROS 64
+#define TIMER0_CLOCK_DIVIDER_BITS TIMER0_CLOCK_DIVIDER_FOR_64_MICROS
+
+#elif (F_CPU == 8000000)
+#define TIMER0_CLOCK_CYCLE_MICROS 128
+#define TIMER0_CLOCK_DIVIDER_BITS TIMER0_CLOCK_DIVIDER_FOR_128_MICROS
+
+#else
 #error F_CPU value must be 1000000 or 8000000.
 #endif
 
-#if (F_CPU == 1000000)
-#define TIMER0_CLOCK_CYCLE_MICROS 64
-#endif
-
-#if (F_CPU == 8000000)
-#define TIMER0_CLOCK_CYCLE_MICROS 128
-#endif
-
-#ifdef MAINS_HAVE_60_HZ
+#if defined(MAINS_HAVE_60_HZ)
 #define HALF_WAVES_PER_SECOND 120
 #else
 #define HALF_WAVES_PER_SECOND 100
@@ -127,34 +131,13 @@
 #error START_PHASE_SHIFT_DEGREES is too high. The TRIAC pulse may reach the next half wave
 #endif
 
-// Timer0 count at end of ramp - Can be adjusted for testing
-#define MINIMUM_PHASE_SHIFT_COUNT 0
-//#define MINIMUM_PHASE_SHIFT_COUNT 23 // for testing
-
 /*
- * Test mode to adjust external trimmer to 50% duty cycle
+ * Timer0 count at end of ramp.
+ * For load detection it must be > 2 (128 us or 2.3 degree).
+ * Voltage is 9 volt @230 AC
+ *
  */
-#define TEST_MODE_MAX_ADC_VALUE 4
-extern bool isTestMode;  // output timer counter value forever in order to adjust the 50% duty cycle trimmer
-
-/*
- * Sometimes it helps the compiler if you use this union
- */
-union LongUnion {
-    struct {
-        uint8_t LowByte;
-        uint8_t MidLowByte;
-        uint8_t MidHighByte;
-        uint8_t HighByte;
-    } byte;
-    struct {
-        uint16_t LowWord;
-        uint16_t HighWord;
-    } word;
-    uint8_t bytes[4];
-    uint32_t ULong;
-    int32_t Long;
-};
+#define MINIMUM_PHASE_SHIFT_COUNT 2
 
 /*
  * States of the state machine
@@ -163,22 +146,16 @@ union LongUnion {
 #define TRIAC_CONTROL_STATE_OUTPUT_COUNTER 1 // output timer counter value forever in order to adjust the 50% duty cycle trimmer
 #define TRIAC_CONTROL_STATE_WAIT_FOR_SETTLING 2
 #define TRIAC_CONTROL_STATE_RAMP_UP 3
-#define TRIAC_CONTROL_STATE_RAMP_DOWN 4 // for future use
-#define TRIAC_CONTROL_STATE_FULL_POWER 5
+#define TRIAC_CONTROL_STATE_FULL_POWER 4
+/*
+ * Calibration mode is entered, when the ADC value from the ramp speed trimmer is less than 4.
+ * Output timer counter value forever in order to adjust the 50% duty cycle trimmer for the mains 50/60 Hz trigger generation.
+ */
+#define TRIAC_CONTROL_STATE_CALIBRATION 10
 
 struct RampControlStruct {
     volatile uint8_t SoftStartState;
-#ifdef INFO
-    /*
-     * Calibration mode is entered, when the ADC value from the ramp speed trimmer is less than 4.
-     * Output timer counter value forever in order to adjust the 50% duty cycle trimmer for the mains 50/60 Hz trigger generation.
-     */
-    bool CalibrationModeActive;
-#endif
 
-    /*
-     * Timer
-     */
     uint8_t NextOCRA; // Next Timer value to be set - if equals 0xFF then no delay is assumed => TRIAC_CONTROL_STATE_FULL_POWER
     /*
      * Since the counter has a resolution of 64 us (and you can see this brightness steps) we use this to get a finer resolution.
@@ -187,13 +164,15 @@ struct RampControlStruct {
     uint8_t MicrosecondsDelayForTriggerPulse;
 
     uint8_t TRIACPulseCount; //counts multiple TRIAC pulses
-#ifdef INFO
+#if defined(INFO)
     volatile uint8_t TimerCountAtTriggerPulse;
+    // Signal to loop() to write ramp data
+    volatile bool DoWriteRampData;
 #endif
     /*
      * Ramp computation
-     * Delay has 3 Byte resolution.
-     * The MidHighByte Byte is directly used for Timer OCRA.
+     * Delay has 3 byte resolution.
+     * The MidHighByte byte is directly used for Timer OCRA.
      * The MidLowByte is used for microseconds delay.
      * The LowByte is used to increase the resolution to enable long ramps.
      */
@@ -208,14 +187,19 @@ struct RampControlStruct {
     volatile uint16_t MainsHalfWaveTimerCountAccumulated;
     uint8_t HalfWaveCounterIntern; // counts half waves to determine end of settling phase
 
+#if defined(LOAD_ON_OFF_DETECTION)
+    uint16_t NoLoadADCReferenceValue;
+    bool isLoadAttached;
+    bool isLoadAttachedStateJustChanged;
+    int8_t NoLoadFoundCount; // Counter to determine if load is attached or detached
+#endif
+
     /*
      * derived timer used by loop()
      */
     volatile uint16_t HalfWaveCounterForExternalTiming;
     // Signal to loop() that interrupt has occurred and new half wave begins
-    volatile bool HalfWaveAtFullPowerJustStarted;
-    // Signal to loop() to write data
-    volatile bool DoWriteRampData;
+    volatile bool HalfWaveJustStarted;
 };
 extern RampControlStruct RampControl;
 
@@ -225,7 +209,6 @@ void setRampDurationMillis(uint32_t aRampDurationMillis);
 void startRamp();
 void stopRamp();
 void switchToFullPower();
-void setCalibrationMode();
 void checkAndHandleCounterOverflowForLoop();
 void printRampInfo();
 void StartTriacPulse();
@@ -239,4 +222,4 @@ void delayMicroseconds(unsigned int us);
 } // extern "C"
 #endif
 
-#endif /* TRIACRAMP_H_ */
+#endif // _TRIAC_RAMP_H
